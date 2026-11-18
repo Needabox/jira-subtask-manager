@@ -79,3 +79,4 @@ export interface ExcelParseResult {
   headerErrors: string[];
   parsingErrors: string[];
 }
+

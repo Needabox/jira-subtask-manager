@@ -23,3 +23,4 @@ export const App: React.FC = () => {
     </QueryClientProvider>
   );
 };
+

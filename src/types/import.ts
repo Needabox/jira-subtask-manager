@@ -60,3 +60,4 @@ export interface ImportProgress {
   currentSummary?: string;
   isComplete: boolean;
 }
+

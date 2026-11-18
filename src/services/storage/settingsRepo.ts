@@ -26,3 +26,4 @@ export const settingsRepo = {
     return updated;
   },
 };
+

@@ -32,3 +32,4 @@ export const DEFAULT_SETTINGS: AppSettings = {
   duplicateDetectionBehavior: "warn_and_ask",
   useViteProxy: false,
 };
+

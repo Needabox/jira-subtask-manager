@@ -61,3 +61,4 @@ export function exportFailedRowsToExcel(failedRows: ImportRowResult[], originalF
 
   XLSX.writeFile(workbook, downloadName);
 }
+

@@ -58,3 +58,4 @@ export function getDB(): Promise<IDBPDatabase<JiraImportDBSchema>> {
   }
   return dbPromise;
 }
+

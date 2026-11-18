@@ -17,3 +17,4 @@ export function useJiraAuth() {
     disconnect: () => jiraAuth.disconnect(),
   };
 }
+
