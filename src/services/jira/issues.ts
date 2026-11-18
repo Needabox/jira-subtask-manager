@@ -17,12 +17,81 @@ export interface CreateSubtaskParams {
 }
 
 export interface MyAssignedTasksFilter {
-  startAt?: number;
+  nextPageToken?: string;
   maxResults?: number;
   projectKey?: string;
   statusCategory?: string; // 'new' | 'indeterminate' | 'done'
   priorityName?: string;
   searchQuery?: string;
+  includeCount?: boolean;
+}
+
+export interface JiraSearchJqlResponse {
+  issues: JiraIssue[];
+  nextPageToken?: string;
+  isLast?: boolean;
+}
+
+export interface MyAssignedTasksResult {
+  issues: JiraIssue[];
+  nextPageToken?: string;
+  isLast: boolean;
+  totalCount?: number;
+}
+
+const ASSIGNED_TASK_FIELDS = [
+  'summary',
+  'status',
+  'priority',
+  'duedate',
+  'created',
+  'updated',
+  'assignee',
+  'reporter',
+  'parent',
+  'project',
+  'components',
+];
+
+function buildAssignedSubtasksJql(filter: MyAssignedTasksFilter): {
+  jqlWhere: string;
+  jqlWithOrder: string;
+} {
+  const { projectKey, statusCategory, priorityName, searchQuery } = filter;
+
+  const jqlParts: string[] = [
+    'assignee = currentUser()',
+    'issuetype in subTaskIssueTypes()',
+  ];
+
+  if (projectKey && projectKey.trim()) {
+    jqlParts.push(`project = "${projectKey.trim().toUpperCase()}"`);
+  }
+
+  if (statusCategory && statusCategory !== 'all') {
+    if (statusCategory === 'done') {
+      jqlParts.push('statusCategory = Done');
+    } else if (statusCategory === 'indeterminate') {
+      jqlParts.push('statusCategory = "In Progress"');
+    } else if (statusCategory === 'new') {
+      jqlParts.push('statusCategory = "To Do"');
+    }
+  }
+
+  if (priorityName && priorityName !== 'all') {
+    jqlParts.push(`priority = "${priorityName.trim()}"`);
+  }
+
+  if (searchQuery && searchQuery.trim()) {
+    const clean = searchQuery.trim().replace(/["\\]/g, '');
+    jqlParts.push(`(summary ~ "${clean}*" OR key = "${clean.toUpperCase()}")`);
+  }
+
+  const jqlWhere = jqlParts.join(' AND ');
+  return {
+    jqlWhere,
+    jqlWithOrder: `${jqlWhere} ORDER BY duedate ASC, created DESC`,
+  };
 }
 
 export const jiraIssues = {
@@ -114,79 +183,72 @@ export const jiraIssues = {
   },
 
   /**
-   * Strictly READ-ONLY retrieval of assigned subtasks for currentUser()
+   * Strictly READ-ONLY retrieval of assigned subtasks via Jira Cloud /rest/api/3/search/jql (CHANGE-2046)
    */
-  async getMyAssignedSubtasks(filter: MyAssignedTasksFilter = {}): Promise<{
-    issues: JiraIssue[];
-    total: number;
-    startAt: number;
-    maxResults: number;
-  }> {
-    const {
-      startAt = 0,
-      maxResults = 25,
-      projectKey,
-      statusCategory,
-      priorityName,
-      searchQuery,
-    } = filter;
+  async getMyAssignedSubtasks(filter: MyAssignedTasksFilter = {}): Promise<MyAssignedTasksResult> {
+    const { nextPageToken, maxResults = 25, includeCount = false } = filter;
+    const { jqlWhere, jqlWithOrder } = buildAssignedSubtasksJql(filter);
 
-    // Build JQL query
-    const jqlParts: string[] = [
-      'assignee = currentUser()',
-      'issuetype in subTaskIssueTypes()',
-    ];
-
-    if (projectKey && projectKey.trim()) {
-      jqlParts.push(`project = "${projectKey.trim().toUpperCase()}"`);
-    }
-
-    if (statusCategory && statusCategory !== 'all') {
-      if (statusCategory === 'done') {
-        jqlParts.push('statusCategory = Done');
-      } else if (statusCategory === 'indeterminate') {
-        jqlParts.push('statusCategory = "In Progress"');
-      } else if (statusCategory === 'new') {
-        jqlParts.push('statusCategory = "To Do"');
-      }
-    }
-
-    if (priorityName && priorityName !== 'all') {
-      jqlParts.push(`priority = "${priorityName.trim()}"`);
-    }
-
-    if (searchQuery && searchQuery.trim()) {
-      const clean = searchQuery.trim().replace(/["\\]/g, '');
-      jqlParts.push(`(summary ~ "${clean}*" OR key = "${clean.toUpperCase()}")`);
-    }
-
-    const jql = `${jqlParts.join(' AND ')} ORDER BY duedate ASC, created DESC`;
-
-    const body = {
-      jql,
-      startAt,
+    const body: {
+      jql: string;
+      maxResults: number;
+      fields: string[];
+      nextPageToken?: string;
+    } = {
+      jql: jqlWithOrder,
       maxResults,
-      fields: [
-        'summary',
-        'status',
-        'priority',
-        'duedate',
-        'created',
-        'updated',
-        'assignee',
-        'reporter',
-        'parent',
-        'project',
-        'components',
-      ],
+      fields: ASSIGNED_TASK_FIELDS,
     };
 
-    return JiraHttpClient.post<{
-      issues: JiraIssue[];
-      total: number;
-      startAt: number;
-      maxResults: number;
-    }>('/search', body);
+    if (nextPageToken) {
+      body.nextPageToken = nextPageToken;
+    }
+
+    const searchPromise = JiraHttpClient.post<JiraSearchJqlResponse>('/search/jql', body);
+
+    const countPromise =
+      includeCount && !nextPageToken
+        ? JiraHttpClient.post<{ count: number }>('/search/approximate-count', {
+            jql: jqlWhere,
+          }).catch(() => null)
+        : Promise.resolve(null);
+
+    const [searchRes, countRes] = await Promise.all([searchPromise, countPromise]);
+
+    const issues = searchRes.issues || [];
+    const hasNext = Boolean(searchRes.nextPageToken) && searchRes.isLast !== true;
+
+    return {
+      issues,
+      nextPageToken: hasNext ? searchRes.nextPageToken : undefined,
+      isLast: searchRes.isLast ?? !hasNext,
+      totalCount: typeof countRes?.count === 'number' ? countRes.count : undefined,
+    };
+  },
+
+  /**
+   * Fetches all assigned subtasks across pages using nextPageToken for Dashboard summaries.
+   */
+  async getAllMyAssignedSubtasks(maxTotal = 500): Promise<JiraIssue[]> {
+    const allIssues: JiraIssue[] = [];
+    let nextPageToken: string | undefined = undefined;
+    const pageLimit = 100;
+
+    while (allIssues.length < maxTotal) {
+      const page = await this.getMyAssignedSubtasks({
+        maxResults: Math.min(pageLimit, maxTotal - allIssues.length),
+        nextPageToken,
+      });
+
+      allIssues.push(...page.issues);
+
+      if (page.isLast || !page.nextPageToken || page.issues.length === 0) {
+        break;
+      }
+
+      nextPageToken = page.nextPageToken;
+    }
+
+    return allIssues;
   },
 };
-

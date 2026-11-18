@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useJiraAuth } from '@/hooks/useJiraAuth';
 import { jiraIssues } from '@/services/jira/issues';
@@ -31,12 +31,22 @@ export const MyAssignedTasksPage: React.FC = () => {
   const [overdueOnly, setOverdueOnly] = useState<boolean>(false);
   const pageSize = 25;
   const [pageIndex, setPageIndex] = useState<number>(0);
+  const [pageTokens, setPageTokens] = useState<Array<string | undefined>>([undefined]);
+  const [approxTotal, setApproxTotal] = useState<number | undefined>(undefined);
+
+  const currentCursor = pageTokens[pageIndex];
+
+  const resetPagination = () => {
+    setPageIndex(0);
+    setPageTokens([undefined]);
+    setApproxTotal(undefined);
+  };
 
   // Sorting
   const [sortField, setSortField] = useState<'duedate' | 'created' | 'key'>('duedate');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
-  // Query Jira Tasks
+  // Query Jira Tasks via /rest/api/3/search/jql
   const {
     data,
     isLoading,
@@ -50,6 +60,7 @@ export const MyAssignedTasksPage: React.FC = () => {
       siteUrl,
       cloudId,
       pageIndex,
+      currentCursor ?? 'first',
       pageSize,
       selectedStatusCategory,
       selectedPriority,
@@ -57,18 +68,29 @@ export const MyAssignedTasksPage: React.FC = () => {
     ],
     queryFn: () =>
       jiraIssues.getMyAssignedSubtasks({
-        startAt: pageIndex * pageSize,
+        nextPageToken: currentCursor,
         maxResults: pageSize,
         statusCategory: selectedStatusCategory,
         priorityName: selectedPriority,
         searchQuery,
+        includeCount: pageIndex === 0,
       }),
     enabled: isConnected,
   });
 
+  useEffect(() => {
+    if (typeof data?.totalCount === 'number') {
+      setApproxTotal(data.totalCount);
+    }
+  }, [data?.totalCount]);
+
   const rawIssues = data?.issues || [];
-  const totalResults = data?.total || 0;
-  const totalPages = Math.ceil(totalResults / pageSize) || 1;
+  const isLastPage = data ? data.isLast : true;
+  const hasNextPage = Boolean(data?.nextPageToken) && !isLastPage;
+  const approxTotalPages =
+    typeof approxTotal === 'number' && approxTotal > 0
+      ? Math.ceil(approxTotal / pageSize)
+      : undefined;
 
   // Client-side filtering & sorting on current page data
   const displayedIssues = useMemo(() => {
@@ -127,7 +149,10 @@ export const MyAssignedTasksPage: React.FC = () => {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => refetch()}
+            onClick={() => {
+              resetPagination();
+              void refetch();
+            }}
             disabled={!isConnected || isFetching}
             className="gap-2 text-xs"
           >
@@ -184,7 +209,7 @@ export const MyAssignedTasksPage: React.FC = () => {
                 value={searchQuery}
                 onChange={(e) => {
                   setSearchQuery(e.target.value);
-                  setPageIndex(0);
+                  resetPagination();
                 }}
               />
             </div>
@@ -195,7 +220,7 @@ export const MyAssignedTasksPage: React.FC = () => {
                 value={selectedStatusCategory}
                 onChange={(e) => {
                   setSelectedStatusCategory(e.target.value);
-                  setPageIndex(0);
+                  resetPagination();
                 }}
                 className="text-xs h-9"
               >
@@ -212,7 +237,7 @@ export const MyAssignedTasksPage: React.FC = () => {
                 value={selectedPriority}
                 onChange={(e) => {
                   setSelectedPriority(e.target.value);
-                  setPageIndex(0);
+                  resetPagination();
                 }}
                 className="text-xs h-9"
               >
@@ -425,18 +450,20 @@ export const MyAssignedTasksPage: React.FC = () => {
         </Table>
 
         {/* Pagination Toolbar */}
-        {totalPages > 1 && (
+        {(pageIndex > 0 || hasNextPage || (approxTotal !== undefined && approxTotal > 0)) && (
           <div className="flex items-center justify-between px-4 py-3 border-t text-xs">
             <span className="text-muted-foreground">
-              Showing page {pageIndex + 1} of {totalPages} ({totalResults} total tasks)
+              Page {pageIndex + 1}
+              {approxTotalPages ? ` of ~${approxTotalPages}` : ''}
+              {typeof approxTotal === 'number' ? ` (~${approxTotal} total tasks)` : ''}
             </span>
             <div className="flex items-center space-x-2">
               <Button
                 variant="outline"
                 size="sm"
                 className="h-7 text-xs"
-                disabled={pageIndex === 0}
-                onClick={() => setPageIndex((p) => p - 1)}
+                disabled={pageIndex === 0 || isFetching}
+                onClick={() => setPageIndex((p) => Math.max(0, p - 1))}
               >
                 Previous
               </Button>
@@ -444,8 +471,17 @@ export const MyAssignedTasksPage: React.FC = () => {
                 variant="outline"
                 size="sm"
                 className="h-7 text-xs"
-                disabled={pageIndex >= totalPages - 1}
-                onClick={() => setPageIndex((p) => p + 1)}
+                disabled={!hasNextPage || isFetching}
+                onClick={() => {
+                  if (!data?.nextPageToken) return;
+                  const nextToken = data.nextPageToken;
+                  setPageTokens((prev) => {
+                    const next = prev.slice(0, pageIndex + 1);
+                    next.push(nextToken);
+                    return next;
+                  });
+                  setPageIndex((p) => p + 1);
+                }}
               >
                 Next
               </Button>

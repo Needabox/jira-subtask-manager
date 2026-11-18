@@ -34,7 +34,7 @@ export const DashboardPage: React.FC = () => {
     error: tasksError,
   } = useQuery({
     queryKey: ['assignedSubtasksSummary', user?.accountId, siteUrl, cloudId],
-    queryFn: () => jiraIssues.getMyAssignedSubtasks({ maxResults: 100 }),
+    queryFn: () => jiraIssues.getAllMyAssignedSubtasks(),
     enabled: isConnected,
   });
 
@@ -44,7 +44,7 @@ export const DashboardPage: React.FC = () => {
     queryFn: () => historyRepo.getOverallStats(),
   });
 
-  const issues = tasksData?.issues || [];
+  const issues = tasksData || [];
 
   // Dynamic calculations for Jira tasks
   const totalAssigned = issues.length;
