@@ -113,9 +113,9 @@ export const DashboardPage: React.FC = () => {
 
       {!isConnected && (
         <Card className="border-amber-300/40 bg-amber-500/10">
-          <CardContent className="flex items-center justify-between p-4">
-            <div className="flex items-center space-x-3">
-              <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0" />
+          <CardContent className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4">
+            <div className="flex items-start sm:items-center space-x-3">
+              <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5 sm:mt-0" />
               <div className="text-sm">
                 <span className="font-semibold text-foreground">Jira is not connected. </span>
                 <span className="text-muted-foreground">
@@ -123,8 +123,8 @@ export const DashboardPage: React.FC = () => {
                 </span>
               </div>
             </div>
-            <Link to="/settings">
-              <Button size="sm" variant="jira">
+            <Link to="/settings" className="shrink-0 w-full sm:w-auto">
+              <Button size="sm" variant="jira" className="w-full sm:w-auto">
                 Connect Now
               </Button>
             </Link>
@@ -133,7 +133,7 @@ export const DashboardPage: React.FC = () => {
       )}
 
       {/* 1. Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
         {/* Total Assigned */}
         <Card>
           <CardHeader className="p-4 pb-2">

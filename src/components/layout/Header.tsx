@@ -12,19 +12,36 @@ import {
   LogOut,
   Sliders,
   Loader2,
+  Menu,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
-export const Header: React.FC = () => {
+interface HeaderProps {
+  onMenuClick?: () => void;
+}
+
+export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
   const { isConnected, isInitializing, user, siteUrl, disconnect } = useJiraAuth();
   const { isDark, setTheme } = useTheme();
 
   return (
     <header className="sticky top-0 z-40 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="flex h-14 items-center justify-between px-6">
-        {/* Left Side: Brand Logo */}
-        <div className="flex items-center space-x-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[#0052CC] text-white shadow-sm font-bold">
+      <div className="flex h-14 items-center justify-between gap-2 px-3 sm:px-6">
+        {/* Left Side: Mobile Menu + Brand Logo */}
+        <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
+          {onMenuClick && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 md:hidden shrink-0"
+              onClick={onMenuClick}
+              aria-label="Open navigation menu"
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+          )}
+
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[#0052CC] text-white shadow-sm font-bold">
             <svg
               className="h-5 w-5 fill-current"
               viewBox="0 0 24 24"
@@ -33,29 +50,31 @@ export const Header: React.FC = () => {
               <path d="M11.53 2c0 2.4 1.97 4.35 4.35 4.35h1.78v1.7c0 2.4 1.94 4.34 4.34 4.35V2.84a.84.84 0 0 0-.84-.84zM6.77 6.8a4.36 4.36 0 0 0 4.34 4.34h1.8v1.72a4.36 4.36 0 0 0 4.34 4.34V7.63a.84.84 0 0 0-.83-.83zM2 11.6c0 2.4 1.95 4.34 4.35 4.34h1.78v1.72c0 2.39 1.94 4.34 4.34 4.34v-9.56a.84.84 0 0 0-.84-.84z" />
             </svg>
           </div>
-          <div>
-            <span className="font-semibold text-base tracking-tight">Jira Subtask Manager</span>
-            <span className="ml-2 text-xs font-mono text-muted-foreground hidden sm:inline-block">
+          <div className="min-w-0 flex items-center gap-2">
+            <span className="font-semibold text-sm sm:text-base tracking-tight truncate">
+              Jira Subtask Manager
+            </span>
+            <span className="text-xs font-mono text-muted-foreground hidden lg:inline-block shrink-0">
               REST v3
             </span>
           </div>
         </div>
 
         {/* Right Side: Connection Status, Theme, Profile */}
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-1.5 sm:space-x-3 shrink-0">
           {isInitializing ? (
-            <Badge variant="outline" className="gap-1.5 py-1 px-2.5 text-muted-foreground">
+            <Badge variant="outline" className="gap-1.5 py-1 px-2 sm:px-2.5 text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" />
-              <span>Checking session...</span>
+              <span className="hidden sm:inline">Checking session...</span>
             </Badge>
           ) : isConnected ? (
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-1.5 sm:space-x-2">
               <Badge variant="success" className="gap-1 hidden sm:inline-flex py-1 px-2.5">
                 <CheckCircle2 className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
                 <span>Connected</span>
               </Badge>
 
-              <div className="flex items-center gap-2 pl-2 border-l">
+              <div className="flex items-center gap-2 pl-1.5 sm:pl-2 sm:border-l">
                 {user?.avatarUrls?.['24x24'] ? (
                   <img
                     src={user.avatarUrls['24x24']}
@@ -91,23 +110,25 @@ export const Header: React.FC = () => {
                 variant="ghost"
                 size="sm"
                 className="h-8 px-2 text-muted-foreground hover:text-destructive"
-                onClick={disconnect}
+                onClick={() => void disconnect()}
                 title="Disconnect Jira session"
+                aria-label="Disconnect Jira session"
               >
                 <LogOut className="h-4 w-4" />
                 <span className="hidden md:inline ml-1 text-xs">Disconnect</span>
               </Button>
             </div>
           ) : (
-            <div className="flex items-center space-x-2">
-              <Badge variant="warning" className="gap-1 py-1 px-2.5">
+            <div className="flex items-center space-x-1.5 sm:space-x-2">
+              <Badge variant="warning" className="gap-1 py-1 px-2 hidden sm:inline-flex">
                 <AlertCircle className="h-3 w-3 text-amber-600 dark:text-amber-400" />
                 <span>Not Connected</span>
               </Badge>
               <Link to="/settings">
-                <Button variant="jira" size="sm" className="h-8 text-xs gap-1.5">
+                <Button variant="jira" size="sm" className="h-8 px-2.5 sm:px-3 text-xs gap-1.5">
                   <Sliders className="h-3.5 w-3.5" />
-                  <span>Connect Jira</span>
+                  <span>Connect</span>
+                  <span className="hidden sm:inline">Jira</span>
                 </Button>
               </Link>
             </div>
@@ -117,9 +138,10 @@ export const Header: React.FC = () => {
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 rounded-full"
+            className="h-8 w-8 rounded-full shrink-0"
             onClick={() => setTheme(isDark ? 'light' : 'dark')}
             title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            aria-label={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
           >
             {isDark ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-700" />}
           </Button>
@@ -128,4 +150,3 @@ export const Header: React.FC = () => {
     </header>
   );
 };
-

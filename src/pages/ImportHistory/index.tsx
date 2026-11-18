@@ -78,8 +78,120 @@ export const ImportHistoryPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Sessions Table */}
-      <Card>
+      {/* Mobile Sessions List (< md) */}
+      <div className="md:hidden space-y-3">
+        {isLoading ? (
+          <Card>
+            <CardContent className="p-8 text-center text-xs text-muted-foreground">
+              Loading history...
+            </CardContent>
+          </Card>
+        ) : sessions.length === 0 ? (
+          <Card>
+            <CardContent className="p-10 text-center text-xs text-muted-foreground space-y-2">
+              <FileSpreadsheet className="h-8 w-8 mx-auto text-muted-foreground/40" />
+              <p>No import sessions recorded yet.</p>
+            </CardContent>
+          </Card>
+        ) : (
+          sessions.map((session) => (
+            <Card key={session.id}>
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-sm truncate" title={session.fileName}>
+                      {session.fileName}
+                    </div>
+                    <div className="text-[11px] font-mono text-muted-foreground mt-0.5">
+                      {format(parseISO(session.importDate), 'dd MMM yyyy, HH:mm')}
+                    </div>
+                  </div>
+                  <Badge
+                    variant={
+                      session.status === 'COMPLETED'
+                        ? 'success'
+                        : session.status === 'PARTIAL'
+                        ? 'warning'
+                        : 'destructive'
+                    }
+                    className="text-[10px] shrink-0"
+                  >
+                    {session.status}
+                  </Badge>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-center text-xs bg-muted/40 rounded-lg p-2">
+                  <div>
+                    <div className="text-[10px] text-muted-foreground">Total</div>
+                    <div className="font-bold">{session.totalRows}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-muted-foreground">Success</div>
+                    <div className="font-semibold text-emerald-600 dark:text-emerald-400">
+                      {session.successfulRows}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-muted-foreground">Failed</div>
+                    <div className="font-semibold text-destructive">{session.failedRows}</div>
+                  </div>
+                </div>
+
+                {session.projectKeys.length > 0 && (
+                  <div className="text-[11px] text-muted-foreground font-mono truncate">
+                    Projects: {session.projectKeys.join(', ')}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 px-2.5 text-xs gap-1 flex-1 sm:flex-initial"
+                    onClick={() => {
+                      setSelectedSession(session);
+                      setStatusFilter('ALL');
+                    }}
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    <span>Details</span>
+                  </Button>
+
+                  {session.failedRows > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 px-2.5 text-xs gap-1 text-destructive hover:text-destructive flex-1 sm:flex-initial"
+                      onClick={() => handleExportFailed(session)}
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      <span>Export Failed</span>
+                    </Button>
+                  )}
+
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
+                    onClick={() => {
+                      if (confirm(`Delete session "${session.fileName}" from history?`)) {
+                        deleteMutation.mutate(session.id);
+                      }
+                    }}
+                    title="Delete Session"
+                    aria-label="Delete Session"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))
+        )}
+      </div>
+
+      {/* Desktop Sessions Table (>= md) */}
+      <Card className="hidden md:block">
         <CardContent className="p-0">
           <Table>
             <TableHeader>
@@ -195,12 +307,12 @@ export const ImportHistoryPage: React.FC = () => {
       {/* Session Details Modal */}
       {selectedSession && (
         <Dialog open={Boolean(selectedSession)} onOpenChange={() => setSelectedSession(null)}>
-          <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col">
+          <DialogContent className="max-w-4xl max-h-[90dvh] flex flex-col">
             <DialogHeader>
-              <div className="flex items-center justify-between pr-6">
-                <div>
-                  <DialogTitle className="text-lg font-bold flex items-center gap-2">
-                    <span>{selectedSession.fileName}</span>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pr-6 text-left">
+                <div className="min-w-0">
+                  <DialogTitle className="text-base sm:text-lg font-bold flex flex-wrap items-center gap-2">
+                    <span className="truncate max-w-[240px] sm:max-w-md">{selectedSession.fileName}</span>
                     <Badge
                       variant={
                         selectedSession.status === 'COMPLETED'
@@ -209,7 +321,7 @@ export const ImportHistoryPage: React.FC = () => {
                           ? 'warning'
                           : 'destructive'
                       }
-                      className="text-xs"
+                      className="text-xs shrink-0"
                     >
                       {selectedSession.status}
                     </Badge>
@@ -223,7 +335,7 @@ export const ImportHistoryPage: React.FC = () => {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="gap-1.5 text-xs text-destructive hover:text-destructive shrink-0"
+                    className="gap-1.5 text-xs text-destructive hover:text-destructive shrink-0 w-full sm:w-auto"
                     onClick={() => handleExportFailed(selectedSession)}
                   >
                     <Download className="h-3.5 w-3.5" />
@@ -234,7 +346,7 @@ export const ImportHistoryPage: React.FC = () => {
             </DialogHeader>
 
             {/* Filter buttons */}
-            <div className="flex items-center gap-2 py-2 border-b text-xs">
+            <div className="flex flex-wrap items-center gap-1.5 py-2 border-b text-xs">
               <Button
                 variant={statusFilter === 'ALL' ? 'default' : 'ghost'}
                 size="sm"
@@ -269,8 +381,69 @@ export const ImportHistoryPage: React.FC = () => {
               </Button>
             </div>
 
-            {/* Rows Table */}
+            {/* Rows List (Mobile Cards + Desktop Table) */}
             <div className="flex-1 overflow-auto border rounded-lg">
+              {/* Mobile Rows (< sm) */}
+              <div className="sm:hidden divide-y divide-border">
+                {isRowsLoading ? (
+                  <div className="p-6 text-center text-xs text-muted-foreground">
+                    Loading row logs...
+                  </div>
+                ) : filteredRows.length === 0 ? (
+                  <div className="p-6 text-center text-xs text-muted-foreground">
+                    No rows found with status &quot;{statusFilter}&quot;.
+                  </div>
+                ) : (
+                  filteredRows.map((r, i) => (
+                    <div key={r.id || i} className="p-3 space-y-1.5 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 font-mono">
+                          <span className="text-muted-foreground">#{r.rowNumber}</span>
+                          <span className="font-semibold text-primary">{r.storyKey}</span>
+                        </div>
+                        <Badge
+                          variant={
+                            r.status === 'SUCCESS'
+                              ? 'success'
+                              : r.status === 'FAILED'
+                              ? 'destructive'
+                              : 'secondary'
+                          }
+                          className="text-[10px]"
+                        >
+                          {r.status}
+                        </Badge>
+                      </div>
+                      <p className="font-medium text-foreground break-words">{r.summary}</p>
+                      {r.jiraKey && (
+                        <div className="font-mono">
+                          {r.jiraUrl ? (
+                            <a
+                              href={r.jiraUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-primary hover:underline inline-flex items-center gap-1 font-bold"
+                            >
+                              <span>{r.jiraKey}</span>
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          ) : (
+                            <span className="font-bold">{r.jiraKey}</span>
+                          )}
+                        </div>
+                      )}
+                      {r.errorMessage && (
+                        <p className="text-destructive bg-destructive/10 rounded px-2 py-1 text-[11px] break-words">
+                          {r.errorMessage}
+                        </p>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Desktop Rows Table (>= sm) */}
+              <div className="hidden sm:block">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -348,6 +521,7 @@ export const ImportHistoryPage: React.FC = () => {
                   )}
                 </TableBody>
               </Table>
+              </div>
             </div>
 
             <DialogFooter className="pt-2">

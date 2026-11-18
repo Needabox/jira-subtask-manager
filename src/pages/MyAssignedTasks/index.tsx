@@ -177,9 +177,9 @@ export const MyAssignedTasksPage: React.FC = () => {
 
       {!isConnected && (
         <Card className="border-amber-400/40 bg-amber-500/10">
-          <CardContent className="flex items-center justify-between p-4">
-            <div className="flex items-center space-x-3">
-              <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0" />
+          <CardContent className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4">
+            <div className="flex items-start sm:items-center space-x-3">
+              <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5 sm:mt-0" />
               <div className="text-sm">
                 <span className="font-semibold text-foreground">Jira is not connected. </span>
                 <span className="text-muted-foreground">
@@ -187,8 +187,8 @@ export const MyAssignedTasksPage: React.FC = () => {
                 </span>
               </div>
             </div>
-            <Link to="/settings">
-              <Button size="sm" variant="jira">
+            <Link to="/settings" className="shrink-0 w-full sm:w-auto">
+              <Button size="sm" variant="jira" className="w-full sm:w-auto">
                 Connect Settings
               </Button>
             </Link>
@@ -266,8 +266,154 @@ export const MyAssignedTasksPage: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Tasks Table */}
-      <div className="border rounded-xl bg-card overflow-hidden">
+      {/* Mobile Sort Controls (< md) */}
+      <div className="md:hidden flex items-center justify-between gap-2 text-xs">
+        <span className="text-muted-foreground font-medium">Sort by:</span>
+        <div className="flex items-center gap-1.5">
+          {(['duedate', 'created', 'key'] as const).map((field) => (
+            <Button
+              key={field}
+              variant={sortField === field ? 'secondary' : 'outline'}
+              size="sm"
+              className="h-7 px-2.5 text-[11px]"
+              onClick={() => toggleSort(field)}
+            >
+              {field === 'duedate' ? 'Due Date' : field === 'created' ? 'Created' : 'Key'}
+              {sortField === field ? (sortOrder === 'asc' ? ' ↑' : ' ↓') : ''}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      {/* Mobile Task Cards (< md) */}
+      <div className="md:hidden space-y-3">
+        {isLoading ? (
+          <div className="border rounded-xl bg-card p-8 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+            <span>Loading assigned subtasks from Jira...</span>
+          </div>
+        ) : error ? (
+          <div className="border rounded-xl bg-card p-6 text-center text-destructive text-xs">
+            Error loading Jira tasks: {error instanceof Error ? error.message : 'Unknown'}
+          </div>
+        ) : displayedIssues.length === 0 ? (
+          <div className="border rounded-xl bg-card p-8 text-center text-muted-foreground text-xs space-y-2">
+            <CheckSquare className="h-6 w-6 mx-auto text-muted-foreground/50" />
+            <p>No assigned subtasks match your criteria.</p>
+          </div>
+        ) : (
+          displayedIssues.map((issue) => {
+            const isOverdue = isTaskOverdue(
+              issue.fields.duedate,
+              issue.fields.status.statusCategory.key
+            );
+            const parentKey = issue.fields.parent?.key;
+
+            return (
+              <Card
+                key={issue.id}
+                className={isOverdue ? 'border-destructive/40 bg-destructive/5' : ''}
+              >
+                <CardContent className="p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0 font-mono text-xs">
+                      {siteUrl ? (
+                        <a
+                          href={`${siteUrl}/browse/${issue.key}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-semibold text-primary hover:underline truncate"
+                        >
+                          {issue.key}
+                        </a>
+                      ) : (
+                        <span className="font-semibold text-primary truncate">{issue.key}</span>
+                      )}
+                      {parentKey && (
+                        <span className="text-[11px] text-muted-foreground truncate">
+                          ({parentKey})
+                        </span>
+                      )}
+                    </div>
+
+                    <Badge
+                      variant={
+                        issue.fields.status.statusCategory.key === 'done'
+                          ? 'success'
+                          : issue.fields.status.statusCategory.key === 'indeterminate'
+                          ? 'warning'
+                          : 'secondary'
+                      }
+                      className="text-[10px] shrink-0"
+                    >
+                      {issue.fields.status.name}
+                    </Badge>
+                  </div>
+
+                  <p className="text-xs font-medium text-foreground break-words">
+                    {issue.fields.summary}
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                    <div>
+                      <span className="opacity-75">Priority: </span>
+                      <span className="text-foreground">{issue.fields.priority?.name || '—'}</span>
+                    </div>
+                    <div className="font-mono">
+                      {issue.fields.duedate ? (
+                        <span
+                          className={
+                            isOverdue
+                              ? 'text-destructive font-semibold inline-flex items-center gap-1'
+                              : 'text-foreground'
+                          }
+                        >
+                          {isOverdue && <AlertTriangle className="h-3 w-3 shrink-0" />}
+                          {issue.fields.duedate}
+                        </span>
+                      ) : (
+                        <span>No due date</span>
+                      )}
+                    </div>
+                    <div className="truncate">
+                      <span className="opacity-75">Assignee: </span>
+                      <span className="text-foreground">{issue.fields.assignee?.displayName || 'Unassigned'}</span>
+                    </div>
+                    <div className="truncate">
+                      <span className="opacity-75">Comp: </span>
+                      <span className="text-foreground">
+                        {issue.fields.components && issue.fields.components.length > 0
+                          ? issue.fields.components.map((c) => c.name).join(', ')
+                          : '—'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {siteUrl && (
+                    <div className="flex items-center justify-between pt-1.5 border-t text-[11px] text-muted-foreground">
+                      <span className="font-mono">
+                        Created {format(parseISO(issue.fields.created), 'yyyy-MM-dd')}
+                      </span>
+                      <a
+                        href={`${siteUrl}/browse/${issue.key}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-primary hover:underline inline-flex items-center gap-1 font-medium"
+                      >
+                        <span>Open in Jira</span>
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })
+        )}
+      </div>
+
+      {/* Desktop Tasks Table (>= md) */}
+      <div className="hidden md:block border rounded-xl bg-card overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
@@ -448,47 +594,47 @@ export const MyAssignedTasksPage: React.FC = () => {
             )}
           </TableBody>
         </Table>
-
-        {/* Pagination Toolbar */}
-        {(pageIndex > 0 || hasNextPage || (approxTotal !== undefined && approxTotal > 0)) && (
-          <div className="flex items-center justify-between px-4 py-3 border-t text-xs">
-            <span className="text-muted-foreground">
-              Page {pageIndex + 1}
-              {approxTotalPages ? ` of ~${approxTotalPages}` : ''}
-              {typeof approxTotal === 'number' ? ` (~${approxTotal} total tasks)` : ''}
-            </span>
-            <div className="flex items-center space-x-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs"
-                disabled={pageIndex === 0 || isFetching}
-                onClick={() => setPageIndex((p) => Math.max(0, p - 1))}
-              >
-                Previous
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs"
-                disabled={!hasNextPage || isFetching}
-                onClick={() => {
-                  if (!data?.nextPageToken) return;
-                  const nextToken = data.nextPageToken;
-                  setPageTokens((prev) => {
-                    const next = prev.slice(0, pageIndex + 1);
-                    next.push(nextToken);
-                    return next;
-                  });
-                  setPageIndex((p) => p + 1);
-                }}
-              >
-                Next
-              </Button>
-            </div>
-          </div>
-        )}
       </div>
+
+      {/* Pagination Toolbar */}
+      {(pageIndex > 0 || hasNextPage || (approxTotal !== undefined && approxTotal > 0)) && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-4 py-3 border rounded-xl bg-card text-xs">
+          <span className="text-muted-foreground">
+            Page {pageIndex + 1}
+            {approxTotalPages ? ` of ~${approxTotalPages}` : ''}
+            {typeof approxTotal === 'number' ? ` (~${approxTotal} total tasks)` : ''}
+          </span>
+          <div className="flex items-center space-x-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 sm:h-7 text-xs"
+              disabled={pageIndex === 0 || isFetching}
+              onClick={() => setPageIndex((p) => Math.max(0, p - 1))}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 sm:h-7 text-xs"
+              disabled={!hasNextPage || isFetching}
+              onClick={() => {
+                if (!data?.nextPageToken) return;
+                const nextToken = data.nextPageToken;
+                setPageTokens((prev) => {
+                  const next = prev.slice(0, pageIndex + 1);
+                  next.push(nextToken);
+                  return next;
+                });
+                setPageIndex((p) => p + 1);
+              }}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

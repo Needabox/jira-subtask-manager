@@ -259,14 +259,14 @@ export const SettingsPage: React.FC = () => {
       {/* 1. Jira Connection Section */}
       <Card>
         <CardHeader className="pb-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center space-x-2">
-              <KeyRound className="h-5 w-5 text-primary" />
+              <KeyRound className="h-5 w-5 text-primary shrink-0" />
               <CardTitle className="text-lg">Jira Cloud Connection</CardTitle>
             </div>
             <Badge
               variant={isInitializing ? 'outline' : isConnected ? 'success' : 'destructive'}
-              className="gap-1.5 py-1 px-2.5"
+              className="gap-1.5 py-1 px-2.5 self-start sm:self-auto"
             >
               {isInitializing ? (
                 <>
@@ -377,11 +377,11 @@ export const SettingsPage: React.FC = () => {
             </div>
           ) : (
             <Tabs defaultValue={serverConfig?.oauthConfigured ? 'oauth' : 'api_token'}>
-              <TabsList className="mb-4">
-                <TabsTrigger value="oauth" className="text-xs">
+              <TabsList className="mb-4 flex flex-wrap h-auto w-full sm:w-auto gap-1">
+                <TabsTrigger value="oauth" className="text-xs flex-1 sm:flex-initial">
                   OAuth 2.0 (3LO) {serverConfig?.oauthConfigured ? '✓ Ready' : ''}
                 </TabsTrigger>
-                <TabsTrigger value="api_token" className="text-xs">
+                <TabsTrigger value="api_token" className="text-xs flex-1 sm:flex-initial">
                   Jira API Token (Proxied)
                 </TabsTrigger>
               </TabsList>
@@ -397,9 +397,9 @@ export const SettingsPage: React.FC = () => {
                 )}
 
                 <div className="p-4 rounded-lg border bg-muted/20 space-y-3 text-xs">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2 font-semibold">
-                      <Lock className="h-4 w-4 text-primary" />
+                      <Lock className="h-4 w-4 text-primary shrink-0" />
                       <span>Atlassian OAuth 2.0 (3LO) Flow</span>
                     </div>
                     <Badge variant={serverConfig?.oauthConfigured ? 'success' : 'warning'} className="text-[10px]">
@@ -418,7 +418,7 @@ export const SettingsPage: React.FC = () => {
                       <Button
                         variant="jira"
                         size="sm"
-                        className="text-xs gap-1.5"
+                        className="text-xs gap-1.5 w-full sm:w-auto"
                         disabled={!serverConfig.hasSessionSecret}
                         onClick={() => {
                           jiraAuth.startOAuthRedirect(serverConfig.oauthClientId!, oauthRedirectUri);
@@ -446,14 +446,14 @@ export const SettingsPage: React.FC = () => {
                             Atlassian Developer Console
                           </a>{' '}
                           with scopes{' '}
-                          <code className="bg-muted px-1 py-0.5 rounded">
+                          <code className="bg-muted px-1 py-0.5 rounded break-words inline-block">
                             read:jira-work write:jira-work read:jira-user read:me offline_access
                           </code>
                           .
                         </li>
                         <li>
                           Set the Callback URL in Atlassian Console to:{' '}
-                          <code className="bg-muted px-1.5 py-0.5 rounded text-foreground font-mono select-all">
+                          <code className="bg-muted px-1.5 py-0.5 rounded text-foreground font-mono select-all break-all">
                             {oauthRedirectUri}
                           </code>
                         </li>
@@ -577,7 +577,7 @@ export const SettingsPage: React.FC = () => {
                 setSettings({ ...settings, subtaskIssueTypeName: e.target.value })
               }
               placeholder="Sub-task"
-              className="text-xs max-w-sm"
+              className="text-xs w-full sm:max-w-sm"
             />
             <p className="text-[11px] text-muted-foreground">
               Default is &quot;Sub-task&quot;. The system matches this against the project&apos;s configured issue types.
@@ -586,12 +586,12 @@ export const SettingsPage: React.FC = () => {
 
           {/* Start Date Custom Field */}
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
               <label className="text-xs font-semibold">Start Date Field</label>
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 text-xs gap-1 text-primary hover:text-primary"
+                className="h-7 text-xs gap-1 text-primary hover:text-primary self-start sm:self-auto px-2"
                 onClick={handleAutoDetectStartDate}
                 disabled={!isConnected || isScanningFields}
               >
@@ -612,7 +612,7 @@ export const SettingsPage: React.FC = () => {
                     startDateCustomFieldName: field?.name || '',
                   });
                 }}
-                className="text-xs max-w-md"
+                className="text-xs w-full sm:max-w-md"
               >
                 <option value="">(Auto-detect on import)</option>
                 {availableFields
@@ -637,7 +637,7 @@ export const SettingsPage: React.FC = () => {
                   setSettings({ ...settings, startDateCustomFieldId: e.target.value })
                 }
                 placeholder="e.g. customfield_10015 (Leave empty for auto-detect)"
-                className="text-xs max-w-md font-mono"
+                className="text-xs w-full sm:max-w-md font-mono"
               />
             )}
             <p className="text-[11px] text-muted-foreground">
@@ -650,7 +650,7 @@ export const SettingsPage: React.FC = () => {
             <label className="text-xs font-semibold">
               Import Concurrency: {settings.defaultConcurrency} parallel requests
             </label>
-            <div className="flex items-center gap-3 max-w-xs">
+            <div className="flex items-center gap-3 w-full sm:max-w-xs">
               <input
                 type="range"
                 min="1"
@@ -680,7 +680,7 @@ export const SettingsPage: React.FC = () => {
                   duplicateDetectionBehavior: e.target.value as AppSettings['duplicateDetectionBehavior'],
                 })
               }
-              className="text-xs max-w-sm"
+              className="text-xs w-full sm:max-w-sm"
             >
               <option value="warn_and_ask">Warn and ask for each row (Recommended)</option>
               <option value="always_skip">Always skip duplicate subtasks</option>
@@ -691,13 +691,13 @@ export const SettingsPage: React.FC = () => {
             </p>
           </div>
 
-          <div className="pt-2 flex items-center gap-3">
+          <div className="pt-2 flex flex-col sm:flex-row sm:items-center gap-3">
             <Button
               variant="jira"
               size="sm"
               onClick={handleSaveSettings}
               disabled={isSavingSettings}
-              className="gap-1.5 text-xs"
+              className="gap-1.5 text-xs w-full sm:w-auto"
             >
               <Save className="h-3.5 w-3.5" />
               <span>{isSavingSettings ? 'Saving...' : 'Save Settings'}</span>

@@ -219,7 +219,7 @@ export const ImportTasksPage: React.FC = () => {
         <Button
           variant="outline"
           onClick={downloadTemplateFile}
-          className="gap-2 shrink-0 border-primary/20 hover:border-primary/50 text-foreground"
+          className="gap-2 shrink-0 w-full md:w-auto border-primary/20 hover:border-primary/50 text-foreground"
         >
           <Download className="h-4 w-4 text-primary" />
           <span>Download Excel Template</span>
@@ -230,11 +230,11 @@ export const ImportTasksPage: React.FC = () => {
         <Alert variant="warning">
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle>Jira connection is not active</AlertTitle>
-          <AlertDescription className="flex items-center justify-between">
+          <AlertDescription className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mt-1">
             <span>
               You can parse Excel files, but live Jira validation and Subtask creation require an active connection.
             </span>
-            <Link to="/settings" className="underline font-semibold ml-2">
+            <Link to="/settings" className="underline font-semibold shrink-0">
               Connect Jira
             </Link>
           </AlertDescription>
@@ -247,7 +247,7 @@ export const ImportTasksPage: React.FC = () => {
           <div
             onDragOver={(e) => e.preventDefault()}
             onDrop={handleDrop}
-            className="border-2 border-dashed border-border rounded-xl p-12 text-center bg-card hover:border-primary/50 hover:bg-muted/30 transition-all cursor-pointer flex flex-col items-center justify-center min-h-[300px]"
+            className="border-2 border-dashed border-border rounded-xl p-6 sm:p-12 text-center bg-card hover:border-primary/50 hover:bg-muted/30 transition-all cursor-pointer flex flex-col items-center justify-center min-h-[220px] sm:min-h-[300px]"
             onClick={() => fileInputRef.current?.click()}
           >
             <input
@@ -370,14 +370,14 @@ export const ImportTasksPage: React.FC = () => {
         <div className="space-y-6">
           {/* File Meta & Action Toolbar */}
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 p-4 rounded-xl border bg-card">
-            <div className="flex items-center space-x-3">
+            <div className="flex items-start sm:items-center space-x-3 min-w-0">
               <div className="h-10 w-10 rounded-lg bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0">
                 <FileSpreadsheet className="h-5 w-5" />
               </div>
-              <div>
-                <div className="font-semibold text-sm flex items-center gap-2">
-                  <span>{file?.name}</span>
-                  <span className="text-xs text-muted-foreground">
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-sm flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <span className="truncate max-w-full">{file?.name}</span>
+                  <span className="text-xs text-muted-foreground shrink-0">
                     ({file ? (file.size / 1024).toFixed(1) : 0} KB)
                   </span>
                 </div>
@@ -387,7 +387,7 @@ export const ImportTasksPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
               <Button variant="outline" size="sm" onClick={handleReset} className="gap-1.5 text-xs text-destructive hover:text-destructive">
                 <Trash2 className="h-3.5 w-3.5" />
                 <span>Remove File</span>
@@ -410,12 +410,12 @@ export const ImportTasksPage: React.FC = () => {
           {isValidating && (
             <Card className="border-blue-500/30 bg-blue-500/5">
               <CardContent className="p-4 space-y-2">
-                <div className="flex items-center justify-between text-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs">
                   <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-medium">
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin shrink-0" />
                     <span>Validating with Jira (projects, users, components, duplicates)...</span>
                   </div>
-                  <span className="font-mono text-muted-foreground">
+                  <span className="font-mono text-muted-foreground shrink-0">
                     {validationProgress.current} / {validationProgress.total} rows
                   </span>
                 </div>
@@ -506,8 +506,103 @@ export const ImportTasksPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Preview Table */}
-          <div className="border rounded-xl bg-card overflow-hidden">
+          {/* Mobile Card Preview (< md) */}
+          <div className="md:hidden space-y-3">
+            {paginatedRows.length === 0 ? (
+              <div className="border rounded-xl bg-card p-8 text-center text-muted-foreground text-xs">
+                No rows match current filter.
+              </div>
+            ) : (
+              paginatedRows.map((row) => (
+                <Card
+                  key={row.rowNumber}
+                  className={
+                    row.validationStatus === 'INVALID'
+                      ? 'border-destructive/40 bg-destructive/5'
+                      : row.validationStatus === 'DUPLICATE'
+                      ? 'border-amber-500/40 bg-amber-500/5'
+                      : ''
+                  }
+                >
+                  <CardContent className="p-3.5 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-mono text-[11px] text-muted-foreground">#{row.rowNumber}</span>
+                        <span className="font-mono text-xs font-semibold text-primary truncate">
+                          {row.storyKey}
+                        </span>
+                      </div>
+                      {row.validationStatus === 'VALID' && (
+                        <Badge variant="success" className="text-[10px] shrink-0">
+                          VALID
+                        </Badge>
+                      )}
+                      {row.validationStatus === 'INVALID' && (
+                        <Badge variant="destructive" className="text-[10px] shrink-0">
+                          INVALID
+                        </Badge>
+                      )}
+                      {row.validationStatus === 'DUPLICATE' && (
+                        <Badge variant="warning" className="text-[10px] shrink-0">
+                          DUPLICATE
+                        </Badge>
+                      )}
+                    </div>
+
+                    <p className="text-xs font-semibold text-foreground break-words">{row.summary}</p>
+
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                      <div className="truncate">
+                        <span className="opacity-75">Assignee: </span>
+                        <span className="text-foreground">{row.resolvedAssigneeName || row.assigneeInput}</span>
+                      </div>
+                      <div className="truncate">
+                        <span className="opacity-75">Priority: </span>
+                        <span className="text-foreground">{row.priority}</span>
+                      </div>
+                      <div className="font-mono truncate">
+                        <span>{row.startDate}</span> → <span>{row.dueDate}</span>
+                      </div>
+                      <div className="truncate">
+                        <span className="opacity-75">Comp: </span>
+                        <span className="text-foreground">{row.component1}</span>
+                      </div>
+                    </div>
+
+                    {row.validationErrors.length > 0 && (
+                      <div className="text-[11px] text-destructive bg-destructive/10 rounded px-2 py-1 truncate">
+                        {row.validationErrors[0]}
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-end gap-2 pt-1 border-t">
+                      {row.validationStatus === 'DUPLICATE' && (
+                        <Button
+                          variant={row.duplicateAction === 'IMPORT_ANYWAY' ? 'jira' : 'outline'}
+                          size="sm"
+                          className="h-7 px-2.5 text-[11px]"
+                          onClick={() => toggleDuplicateAction(row.rowNumber)}
+                        >
+                          {row.duplicateAction === 'IMPORT_ANYWAY' ? 'Import Anyway' : 'Skip Duplicate'}
+                        </Button>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2.5 text-[11px]"
+                        onClick={() => setInspectRow(row)}
+                      >
+                        Details
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </div>
+
+          {/* Desktop Preview Table (>= md) */}
+          <div className="hidden md:block border rounded-xl bg-card overflow-hidden">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -617,36 +712,36 @@ export const ImportTasksPage: React.FC = () => {
                 )}
               </TableBody>
             </Table>
-
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between px-4 py-3 border-t text-xs">
-                <span className="text-muted-foreground">
-                  Page {currentPage} of {totalPages}
-                </span>
-                <div className="flex items-center space-x-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 text-xs"
-                    disabled={currentPage === 1}
-                    onClick={() => setCurrentPage((p) => p - 1)}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 text-xs"
-                    disabled={currentPage === totalPages}
-                    onClick={() => setCurrentPage((p) => p + 1)}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
-            )}
           </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-4 py-3 border rounded-xl bg-card text-xs">
+              <span className="text-muted-foreground">
+                Page {currentPage} of {totalPages}
+              </span>
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 sm:h-7 text-xs"
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage((p) => p - 1)}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 sm:h-7 text-xs"
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage((p) => p + 1)}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -725,7 +820,7 @@ export const ImportTasksPage: React.FC = () => {
           </div>
 
           {/* Stats Grid */}
-          <div className="grid grid-cols-4 gap-3 text-center">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
             <div className="p-3 rounded-lg bg-muted/40">
               <div className="text-xs text-muted-foreground">Total Rows</div>
               <div className="text-xl font-bold mt-1">{completedSession.totalRows}</div>
@@ -789,7 +884,7 @@ export const ImportTasksPage: React.FC = () => {
                 <span className="font-semibold text-foreground">{inspectRow.summary}</span>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 p-3 rounded-lg bg-muted/40">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-lg bg-muted/40">
                 <div>
                   <span className="text-muted-foreground block text-[10px]">Assignee (Input):</span>
                   <span>{inspectRow.assigneeInput}</span>
