@@ -25,7 +25,7 @@ import {
 import { format, parseISO } from 'date-fns';
 
 export const DashboardPage: React.FC = () => {
-  const { isConnected, user, siteUrl } = useJiraAuth();
+  const { isConnected, user, siteUrl, cloudId } = useJiraAuth();
 
   // 1. Fetch assigned subtasks from Jira
   const {
@@ -33,7 +33,7 @@ export const DashboardPage: React.FC = () => {
     isLoading: isTasksLoading,
     error: tasksError,
   } = useQuery({
-    queryKey: ['assignedSubtasksSummary', user?.accountId],
+    queryKey: ['assignedSubtasksSummary', user?.accountId, siteUrl, cloudId],
     queryFn: () => jiraIssues.getMyAssignedSubtasks({ maxResults: 100 }),
     enabled: isConnected,
   });

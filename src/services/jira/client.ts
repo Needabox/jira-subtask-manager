@@ -24,59 +24,31 @@ export class JiraHttpClient {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  private static getBaseUrl(): string {
-    const state = jiraAuth.getState();
-    if (state.authMode === 'oauth' && state.cloudId) {
-      return `https://api.atlassian.com/ex/jira/${state.cloudId}/rest/api/3`;
-    }
-    // API Token Mode
-    if (state.cloudId) {
-      return `https://api.atlassian.com/ex/jira/${state.cloudId}/rest/api/3`;
-    }
-    return `${state.siteUrl}/rest/api/3`;
-  }
-
-  private static getHeaders(): HeadersInit {
-    const state = jiraAuth.getState();
-    const headers: Record<string, string> = {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    };
-
-    if (state.authMode === 'oauth' && state.accessToken) {
-      headers['Authorization'] = `Bearer ${state.accessToken}`;
-    } else if (state.email && state.apiToken) {
-      // Basic auth
-      const basic = btoa(`${state.email}:${state.apiToken}`);
-      headers['Authorization'] = `Basic ${basic}`;
-    }
-
-    return headers;
-  }
-
   public static async request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
     const { retryCount = 0, maxRetries = 3, ...fetchOptions } = options;
 
     const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-    const baseUrl = this.getBaseUrl();
-    const url = `${baseUrl}${cleanEndpoint}`;
+    const url = `/api/jira?endpoint=${encodeURIComponent(cleanEndpoint)}`;
 
-    const headers = {
-      ...this.getHeaders(),
-      ...(fetchOptions.headers || {}),
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...((fetchOptions.headers as Record<string, string>) || {}),
     };
 
     try {
       const response = await fetch(url, {
         ...fetchOptions,
+        credentials: 'same-origin',
         headers,
       });
 
       // Handle Rate Limiting (429) & Transient Server Errors (503, 504)
       if ((response.status === 429 || response.status === 503 || response.status === 504) && retryCount < maxRetries) {
-        // Read Retry-After header if present, otherwise exponential backoff: (2^retry * 1000) + jitter
         const retryAfterHeader = response.headers.get('Retry-After');
-        let delayMs = retryAfterHeader ? parseInt(retryAfterHeader, 10) * 1000 : Math.pow(2, retryCount) * 1000 + Math.random() * 500;
+        let delayMs = retryAfterHeader
+          ? parseInt(retryAfterHeader, 10) * 1000
+          : Math.pow(2, retryCount) * 1000 + Math.random() * 500;
         if (isNaN(delayMs) || delayMs <= 0) delayMs = 1500;
 
         await this.sleep(delayMs);
@@ -87,16 +59,21 @@ export class JiraHttpClient {
       }
 
       if (!response.ok) {
-        let errorData: { errorMessages?: string[]; errors?: Record<string, string>; message?: string } = {};
+        let errorData: { errorMessages?: string[]; errors?: Record<string, string>; message?: string; error?: string } = {};
         try {
           errorData = await response.json();
         } catch {
           // Response body was not JSON
         }
 
+        if (response.status === 401) {
+          jiraAuth.markSessionExpired();
+        }
+
         const msg =
           errorData.errorMessages?.[0] ||
           (errorData.errors ? Object.values(errorData.errors)[0] : undefined) ||
+          errorData.error ||
           errorData.message ||
           `Jira API Request failed with status ${response.status}`;
 
@@ -155,4 +132,3 @@ export class JiraHttpClient {
     });
   }
 }
-

@@ -32,8 +32,8 @@ Built with **React 18**, **TypeScript**, **Vite**, **Tailwind CSS**, **shadcn/ui
    - **Export Failed Rows to Excel**: exports failed items in the original 12-column layout + appends `Import Status`, `Error`, and `Error Detail` for instant re-import.
 
 4. **Jira Integration & Settings**
-   - Supports Jira Cloud API Token (Session memory only, zero credential storage on disk/localStorage).
-   - Supports Atlassian OAuth 2.0 (3LO) authorization flow.
+   - Supports Atlassian OAuth 2.0 (3LO) authorization flow (with server-side token exchange and automatic refresh via Vercel Serverless Functions).
+   - Supports Jira Cloud API Token via same-origin serverless proxy (avoids browser CORS errors).
    - Dynamic auto-discovery of Start Date custom field with manual fallback selector.
    - Subtask issue type override configuration.
    - Configurable import concurrency and duplicate handling preferences.
@@ -63,13 +63,141 @@ Headers must be present in this **EXACT order**:
 
 ## 🔒 Security & Architecture Rules
 
-- **Zero Backend Architecture:** 100% frontend. No Node/Express/Golang backend, no PostgreSQL/MySQL/Redis.
-- **Credential Safety:** Sensitive API tokens and OAuth access tokens are stored only in memory or active session storage. They are never logged to console or persisted to localStorage.
-- **Resilience:** Requests to Jira API feature automatic exponential backoff with jitter on HTTP 429 (Rate Limit) and transient network disconnects.
+- **Stateless Vercel Serverless Proxy:** No external database (no PostgreSQL/MySQL/Redis) and no standalone backend server. Thin serverless functions in `/api/` handle OAuth token exchange, SSRF-validated Jira REST API proxying (eliminating browser CORS errors), and session management.
+- **Credential Safety:** Jira API tokens and OAuth access/refresh tokens are encrypted (AES-256-GCM) inside `HttpOnly; Secure; SameSite=Lax` cookies. Client JavaScript, `localStorage`, and `sessionStorage` never store or read API tokens or OAuth secrets.
+- **Resilience:** Requests to Jira API feature automatic exponential backoff with jitter on HTTP 429 (Rate Limit) and transient network disconnects, plus automatic OAuth token refresh.
 
 ---
 
-## 🚀 Getting Started
+## ☁️ Deploying to Vercel (Step-by-Step Guide)
+
+Follow these steps before and during deployment to Vercel so authentication, `HttpOnly` cookie sessions, OAuth 2.0 (3LO), and SPA routing work securely in production.
+
+### Step 1: Pre-Deploy Verification (Local)
+
+Run the build and automated test suite to verify both the React frontend (`src/`) and Vercel Serverless Functions (`api/`):
+
+```bash
+npm run build && npm test
+```
+
+Ensure there are no uncommitted `.env` files (only `.env.example` should be tracked in Git; `.gitignore` already excludes `.env`, `.env.*`, `.local`, and `.vercel`).
+
+---
+
+### Step 2: Generate `SESSION_SECRET` (Required)
+
+The serverless proxy encrypts Jira sessions into `HttpOnly` cookies using **AES-256-GCM**. You must provide a random secret of at least 16 characters (32+ bytes / 64 hex chars recommended).
+
+Generate one locally with OpenSSL or Node.js:
+
+```bash
+# Using OpenSSL
+openssl rand -hex 32
+
+# Or using Node.js
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+Save the generated string for Step 5.
+
+> ⚠️ **Important:** Without `SESSION_SECRET` configured in Vercel, login attempts will be rejected with a configuration warning in `/settings`.
+
+---
+
+### Step 3: *(Optional)* Configure Atlassian OAuth 2.0 (3LO) App
+
+Skip this step if your team only plans to connect using individual **Jira Cloud API Tokens** (`email` + `apiToken` via the *Jira API Token (Proxied)* tab).
+
+If you want one-click **Authorize with Atlassian (OAuth 2.0 3LO)** login:
+
+1. Go to the [Atlassian Developer Console](https://developer.atlassian.com/console/myapps).
+2. Click **Create** → **OAuth 2.0 integration** and name your app (e.g., `Jira Subtask Manager`).
+3. Open **Permissions** → **Jira API** → **Configure**, then add these exact scopes:
+   - **Classic / Granular Jira scopes required by this app:**
+     - `read:jira-work`
+     - `write:jira-work`
+     - `read:jira-user`
+   - **User identity API:**
+     - `read:me`
+   - *(Automatically enabled with refresh tokens)*: `offline_access`
+4. Open **Authorization** → **Configure** (for OAuth 2.0 3LO) and set the **Callback URL** to match your Vercel production domain:
+   ```text
+   https://<your-vercel-project>.vercel.app/settings
+   ```
+   *(If using a custom domain, add `https://<your-custom-domain>/settings` as well.)*
+5. Open **Settings** in the Atlassian app dashboard and copy your:
+   - **Client ID** → `JIRA_OAUTH_CLIENT_ID`
+   - **Secret** → `JIRA_OAUTH_CLIENT_SECRET`
+
+---
+
+### Step 4: Import Project in Vercel
+
+1. Push this repository to GitHub, GitLab, or Bitbucket.
+2. In the [Vercel Dashboard](https://vercel.com/new), click **Add New... → Project** and import your repository.
+3. Verify the **Build & Output Settings** (Vercel auto-detects Vite):
+   - **Framework Preset:** `Vite`
+   - **Build Command:** `npm run build` *(runs `tsc`, `tsc -p tsconfig.api.json --noEmit`, and `vite build`)*
+   - **Output Directory:** `dist`
+   - **Install Command:** `npm install`
+   - **Node.js Version:** `20.x` or `22.x`
+
+---
+
+### Step 5: Configure Environment Variables in Vercel
+
+Before clicking **Deploy** (or inside **Project Settings → Environment Variables**):
+
+| Variable Name | Required? | Environment | Description |
+|---|---|---|---|
+| `SESSION_SECRET` | **Yes** | Production, Preview | Secret key (min. 16 chars, recommended 64 hex chars from Step 2) for encrypting `HttpOnly` session cookies. |
+| `JIRA_OAUTH_CLIENT_ID` | Optional *(Req. for OAuth)* | Production, Preview | Atlassian OAuth 2.0 (3LO) Client ID from Step 3. |
+| `JIRA_OAUTH_CLIENT_SECRET` | Optional *(Req. for OAuth)* | Production, Preview | Atlassian OAuth 2.0 (3LO) Client Secret from Step 3. Stays strictly server-side in `/api/`. |
+
+> 🔒 **Security Note:** Never prefix `SESSION_SECRET` or `JIRA_OAUTH_CLIENT_SECRET` with `VITE_`. Variables without `VITE_` are never bundled into frontend JavaScript.
+
+If you updated Environment Variables **after** an initial deployment, trigger a **Redeploy** from the Vercel Deployments tab so the serverless functions pick up the new values.
+
+---
+
+### Step 6: Routing & Security Headers (`vercel.json`)
+
+The included [`vercel.json`](./vercel.json) automatically handles:
+- **SPA Routing Fallback:** Rewrites non-file, non-API routes (`/import`, `/my-tasks`, `/history`, `/settings`) to `/index.html` so refreshing subpages does not return `404`.
+- **Serverless API Isolation:** Preserves `/api/*` requests (`api/auth/*`, `api/jira.ts`) directly to Vercel Serverless Functions.
+- **Security Headers:** Sets `Cache-Control: no-store` on `/api/*`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy: strict-origin-when-cross-origin`.
+
+---
+
+### Step 7: Post-Deploy Verification Checklist
+
+1. Open `https://<your-vercel-project>.vercel.app/settings`.
+2. Confirm there is **no red banner** warning about missing `SESSION_SECRET`.
+3. Test authentication:
+   - **API Token Mode:** Enter your `https://<site>.atlassian.net`, Atlassian Email, and API Token → click **Connect to Jira Cloud**. Verify your name & avatar appear and remain connected after refreshing the page (`Cmd/Ctrl + R`).
+   - **OAuth 2.0 Mode:** Confirm the OAuth tab shows `Server Configured` → click **Authorize with Atlassian**, approve access, and confirm redirect back to `/settings` connects cleanly.
+4. Open Browser DevTools → **Application**:
+   - Confirm `localStorage` and `sessionStorage` contain **zero** Jira API tokens or OAuth access tokens.
+   - Confirm `Cookies` shows `jira_session` marked `HttpOnly`, `Secure`, and `SameSite=Lax`.
+5. Refresh `/import` or `/my-tasks` directly in the browser address bar to verify SPA routing returns `200 OK` instead of `404`.
+
+---
+
+### Troubleshooting Common Vercel Issues
+
+- **Error: `SESSION_SECRET is not configured in Vercel Environment Variables`**
+  - Add `SESSION_SECRET` in Vercel **Project Settings → Environment Variables**, ensure the right environments (Production/Preview) are checked, and redeploy.
+- **OAuth Callback Fails with `redirect_uri` Mismatch**
+  - Make sure the Callback URL in Atlassian Developer Console matches your exact active domain + `/settings` (e.g., Preview URLs have different subdomains than Production URLs).
+- **OAuth Callback Fails with `OAuth state verification failed`**
+  - Always start login from the same domain/protocol you return to (do not start on a Vercel Preview URL and return to Production URL).
+- **Session Lost Immediately After Login**
+  - Verify `SESSION_SECRET` has at least 16 characters and you are accessing the site over `https://`.
+
+---
+
+## 🚀 Getting Started (Local Development)
 
 ### 1. Installation
 
@@ -83,7 +211,7 @@ npm install
 npm run dev
 ```
 
-App runs on `http://localhost:3000`.
+App runs on `http://localhost:3000` with `/api/*` middleware active locally. Optional env vars can be placed in `.env.local` (see `.env.example`).
 
 ### 3. Run Automated Tests
 
@@ -104,4 +232,6 @@ npm run build
 - `src/tests/excel-parser.test.ts`: Template structure, exact 12 headers, ignored `Estimasi (jam)`, empty row skipping.
 - `src/tests/dates.test.ts`: ISO dates, slash dates, Excel serial numbers, `Start Date <= Due Date`, overdue rules.
 - `src/tests/validation.test.ts`: Story Key syntax, required fields, date sanity checks.
+- `src/tests/serverless-security.test.ts`: AES-256-GCM cookie encryption/decryption, 4KB cookie chunking, SSRF URL & endpoint blocking.
+- `src/tests/api-handlers.test.ts`: Serverless API handlers (`/api/auth/config`, `/api/auth/session`, `/api/auth/logout`, `/api/jira`).
 

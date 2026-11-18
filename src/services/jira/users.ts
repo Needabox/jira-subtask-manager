@@ -1,8 +1,18 @@
 import { JiraHttpClient } from './client';
+import { jiraAuth } from './auth';
 import { JiraUser } from '@/types/jira';
 
 // In-memory cache for user lookup: "projectKey:query" -> JiraUser | null
 const userLookupCache = new Map<string, JiraUser | null>();
+let cachedEpoch = -1;
+
+function ensureEpochCache() {
+  const epoch = jiraAuth.getSessionEpoch();
+  if (epoch !== cachedEpoch) {
+    userLookupCache.clear();
+    cachedEpoch = epoch;
+  }
+}
 
 export const jiraUsers = {
   async getMyself(): Promise<JiraUser> {
@@ -36,6 +46,7 @@ export const jiraUsers = {
     isAmbiguous: boolean;
     allMatches: JiraUser[];
   }> {
+    ensureEpochCache();
     const cacheKey = `${projectKey.toUpperCase()}:${query.trim().toLowerCase()}`;
     if (userLookupCache.has(cacheKey)) {
       const cached = userLookupCache.get(cacheKey);

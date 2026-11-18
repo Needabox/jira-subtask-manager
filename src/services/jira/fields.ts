@@ -1,11 +1,19 @@
 import { JiraHttpClient } from './client';
+import { jiraAuth } from './auth';
 import { JiraField } from '@/types/jira';
 import { settingsRepo } from '../storage/settingsRepo';
 
 let allFieldsCache: JiraField[] | null = null;
+let cachedEpoch = -1;
 
 export const jiraFields = {
   async getAllFields(): Promise<JiraField[]> {
+    const epoch = jiraAuth.getSessionEpoch();
+    if (epoch !== cachedEpoch) {
+      allFieldsCache = null;
+      cachedEpoch = epoch;
+    }
+
     if (allFieldsCache) {
       return allFieldsCache;
     }

@@ -11,11 +11,12 @@ import {
   ExternalLink,
   LogOut,
   Sliders,
+  Loader2,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export const Header: React.FC = () => {
-  const { isConnected, user, siteUrl, disconnect } = useJiraAuth();
+  const { isConnected, isInitializing, user, siteUrl, disconnect } = useJiraAuth();
   const { isDark, setTheme } = useTheme();
 
   return (
@@ -42,7 +43,12 @@ export const Header: React.FC = () => {
 
         {/* Right Side: Connection Status, Theme, Profile */}
         <div className="flex items-center space-x-3">
-          {isConnected ? (
+          {isInitializing ? (
+            <Badge variant="outline" className="gap-1.5 py-1 px-2.5 text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              <span>Checking session...</span>
+            </Badge>
+          ) : isConnected ? (
             <div className="flex items-center space-x-2">
               <Badge variant="success" className="gap-1 hidden sm:inline-flex py-1 px-2.5">
                 <CheckCircle2 className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />

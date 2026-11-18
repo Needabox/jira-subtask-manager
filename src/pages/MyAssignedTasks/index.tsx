@@ -22,7 +22,7 @@ import { Link } from 'react-router-dom';
 import { format, parseISO } from 'date-fns';
 
 export const MyAssignedTasksPage: React.FC = () => {
-  const { isConnected, user, siteUrl } = useJiraAuth();
+  const { isConnected, user, siteUrl, cloudId } = useJiraAuth();
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -47,6 +47,8 @@ export const MyAssignedTasksPage: React.FC = () => {
     queryKey: [
       'myAssignedSubtasks',
       user?.accountId,
+      siteUrl,
+      cloudId,
       pageIndex,
       pageSize,
       selectedStatusCategory,

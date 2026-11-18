@@ -1,61 +1,70 @@
-import { JiraConnectionState } from '@/types/settings';
-import { JiraAccessibleResource, JiraUser } from '@/types/jira';
+import { JiraConnectionState, JiraSiteOption, ServerAuthConfig } from '@/types/settings';
+import { JiraUser } from '@/types/jira';
 
-// Store credentials only in memory/sessionStorage during active session.
-// NEVER in localStorage or console logs.
-const SESSION_AUTH_KEY = 'jira_active_session_auth';
+const OAUTH_STATE_KEY = 'jira_oauth_csrf_state';
+
+interface SessionApiResponse {
+  isConnected: boolean;
+  authMode?: 'oauth' | 'api_token';
+  siteUrl?: string;
+  cloudId?: string;
+  user?: JiraUser | null;
+  availableSites?: JiraSiteOption[];
+  sessionExpired?: boolean;
+  error?: string;
+}
 
 class JiraAuthService {
   private state: JiraConnectionState = {
     isConnected: false,
+    isInitializing: true,
     authMode: 'api_token',
     siteUrl: '',
     cloudId: '',
     user: null,
+    availableSites: [],
   };
 
   private listeners: Array<(state: JiraConnectionState) => void> = [];
+  private initPromise: Promise<void> | null = null;
+  private sessionEpoch = 0;
 
   constructor() {
-    this.loadFromSession();
-  }
-
-  private loadFromSession() {
-    try {
-      const saved = sessionStorage.getItem(SESSION_AUTH_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        this.state = {
-          ...parsed,
-          isConnected: Boolean(parsed.siteUrl && (parsed.accessToken || parsed.apiToken)),
-        };
-      }
-    } catch {
-      // In case sessionStorage is unavailable or corrupt
+    if (typeof window !== 'undefined') {
+      this.initPromise = this.restoreSession();
+    } else {
+      this.state.isInitializing = false;
     }
   }
 
-  private persistSession() {
-    try {
-      sessionStorage.setItem(SESSION_AUTH_KEY, JSON.stringify(this.state));
-    } catch {
-      // Ignore
+  private setState(next: JiraConnectionState) {
+    if (
+      next.isConnected !== this.state.isConnected ||
+      next.siteUrl !== this.state.siteUrl ||
+      next.cloudId !== this.state.cloudId
+    ) {
+      this.sessionEpoch++;
     }
+    this.state = next;
     this.notify();
   }
 
-  public subscribe(callback: (state: JiraConnectionState) => void): () => void {
-    this.listeners.push(callback);
-    callback(this.state);
-    return () => {
-      this.listeners = this.listeners.filter((cb) => cb !== callback);
-    };
+  public getSessionEpoch(): number {
+    return this.sessionEpoch;
   }
 
   private notify() {
     for (const listener of this.listeners) {
       listener({ ...this.state });
     }
+  }
+
+  public subscribe(callback: (state: JiraConnectionState) => void): () => void {
+    this.listeners.push(callback);
+    callback({ ...this.state });
+    return () => {
+      this.listeners = this.listeners.filter((cb) => cb !== callback);
+    };
   }
 
   public getState(): JiraConnectionState {
@@ -66,70 +75,122 @@ class JiraAuthService {
     return this.state.isConnected && Boolean(this.state.cloudId || this.state.siteUrl);
   }
 
-  public setApiTokenConnection(params: {
+  public async waitUntilReady(): Promise<void> {
+    if (this.initPromise) {
+      await this.initPromise;
+    }
+  }
+
+  public async getServerConfig(): Promise<ServerAuthConfig> {
+    const res = await fetch('/api/auth/config', {
+      method: 'GET',
+      credentials: 'same-origin',
+    });
+
+    if (!res.ok) {
+      throw new Error('Failed to load server authentication configuration.');
+    }
+
+    return res.json();
+  }
+
+  public async restoreSession(): Promise<void> {
+    try {
+      const res = await fetch('/api/auth/session', {
+        method: 'GET',
+        credentials: 'same-origin',
+      });
+
+      if (!res.ok) {
+        this.setState({
+          isConnected: false,
+          isInitializing: false,
+          authMode: 'api_token',
+          siteUrl: '',
+          cloudId: '',
+          user: null,
+          availableSites: [],
+        });
+        return;
+      }
+
+      const data = (await res.json()) as SessionApiResponse;
+      if (data.isConnected && data.user) {
+        this.setState({
+          isConnected: true,
+          isInitializing: false,
+          authMode: data.authMode || 'api_token',
+          siteUrl: data.siteUrl || '',
+          cloudId: data.cloudId || '',
+          user: data.user,
+          availableSites: data.availableSites || [],
+          connectedAt: new Date().toISOString(),
+          sessionExpired: false,
+        });
+      } else {
+        this.setState({
+          isConnected: false,
+          isInitializing: false,
+          authMode: 'api_token',
+          siteUrl: '',
+          cloudId: '',
+          user: null,
+          availableSites: [],
+          sessionExpired: Boolean(data.sessionExpired),
+        });
+      }
+    } catch {
+      this.setState({
+        isConnected: false,
+        isInitializing: false,
+        authMode: 'api_token',
+        siteUrl: '',
+        cloudId: '',
+        user: null,
+        availableSites: [],
+      });
+    }
+  }
+
+  public async connectWithApiToken(params: {
     siteUrl: string;
     email: string;
     apiToken: string;
-    cloudId?: string;
-    user: JiraUser;
-  }) {
-    // Normalize siteUrl
-    let cleanUrl = params.siteUrl.trim();
-    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
-      cleanUrl = 'https://' + cleanUrl;
+  }): Promise<JiraConnectionState> {
+    const res = await fetch('/api/auth/token', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        siteUrl: params.siteUrl.trim(),
+        email: params.email.trim(),
+        apiToken: params.apiToken.trim(),
+      }),
+    });
+
+    const data = (await res.json().catch(() => ({}))) as SessionApiResponse;
+
+    if (!res.ok || !data.isConnected || !data.user) {
+      throw new Error(data.error || `Connection failed (${res.status})`);
     }
-    cleanUrl = cleanUrl.replace(/\/+$/, '');
 
-    this.state = {
+    const nextState: JiraConnectionState = {
       isConnected: true,
+      isInitializing: false,
       authMode: 'api_token',
-      siteUrl: cleanUrl,
-      cloudId: params.cloudId || '',
-      user: params.user,
-      email: params.email.trim(),
-      apiToken: params.apiToken.trim(),
-      connectedAt: new Date().toISOString(),
-    };
-    this.persistSession();
-  }
-
-  public setOAuthConnection(params: {
-    siteUrl: string;
-    cloudId: string;
-    accessToken: string;
-    user: JiraUser;
-  }) {
-    this.state = {
-      isConnected: true,
-      authMode: 'oauth',
-      siteUrl: params.siteUrl,
-      cloudId: params.cloudId,
-      user: params.user,
-      accessToken: params.accessToken,
-      connectedAt: new Date().toISOString(),
-    };
-    this.persistSession();
-  }
-
-  public disconnect() {
-    this.state = {
-      isConnected: false,
-      authMode: 'api_token',
-      siteUrl: '',
+      siteUrl: data.siteUrl || '',
       cloudId: '',
-      user: null,
-      accessToken: undefined,
-      apiToken: undefined,
-      email: undefined,
-      connectedAt: undefined,
+      user: data.user,
+      availableSites: [],
+      connectedAt: new Date().toISOString(),
+      sessionExpired: false,
     };
-    sessionStorage.removeItem(SESSION_AUTH_KEY);
-    this.notify();
+    this.setState(nextState);
+    return nextState;
   }
 
-  /**
-   * Generates standard Atlassian OAuth 2.0 (3LO) authorization URL
-   */
   public getOAuthAuthorizeUrl(clientId: string, redirectUri: string, state: string): string {
     const scopes = [
       'read:jira-work',
@@ -144,7 +205,7 @@ class JiraAuthService {
       client_id: clientId,
       scope: scopes,
       redirect_uri: redirectUri,
-      state: state,
+      state,
       response_type: 'code',
       prompt: 'consent',
     });
@@ -152,22 +213,124 @@ class JiraAuthService {
     return `https://auth.atlassian.com/authorize?${params.toString()}`;
   }
 
-  /**
-   * Fetches accessible cloud sites for OAuth token
-   */
-  public async fetchAccessibleResources(accessToken: string): Promise<JiraAccessibleResource[]> {
-    const response = await fetch('https://api.atlassian.com/oauth/token/accessible-resources', {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: 'application/json',
-      },
-    });
+  public startOAuthRedirect(clientId: string, redirectUri: string): void {
+    const randomBytes = new Uint8Array(16);
+    crypto.getRandomValues(randomBytes);
+    const state = Array.from(randomBytes, (b) => b.toString(16).padStart(2, '0')).join('');
 
-    if (!response.ok) {
-      throw new Error(`Failed to retrieve Jira Cloud resources: ${response.statusText}`);
+    sessionStorage.setItem(OAUTH_STATE_KEY, state);
+    window.location.href = this.getOAuthAuthorizeUrl(clientId, redirectUri, state);
+  }
+
+  public async completeOAuthCallback(params: {
+    code: string;
+    state: string;
+    redirectUri: string;
+  }): Promise<JiraConnectionState> {
+    const expectedState = sessionStorage.getItem(OAUTH_STATE_KEY);
+    sessionStorage.removeItem(OAUTH_STATE_KEY);
+
+    if (!expectedState || expectedState !== params.state) {
+      throw new Error('OAuth state verification failed (possible CSRF or stale login tab). Please try connecting again.');
     }
 
-    return response.json();
+    const res = await fetch('/api/auth/oauth-exchange', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        code: params.code,
+        redirectUri: params.redirectUri,
+      }),
+    });
+
+    const data = (await res.json().catch(() => ({}))) as SessionApiResponse;
+    if (!res.ok || !data.isConnected || !data.user) {
+      throw new Error(data.error || `OAuth authorization exchange failed (${res.status})`);
+    }
+
+    const nextState: JiraConnectionState = {
+      isConnected: true,
+      isInitializing: false,
+      authMode: 'oauth',
+      siteUrl: data.siteUrl || '',
+      cloudId: data.cloudId || '',
+      user: data.user,
+      availableSites: data.availableSites || [],
+      connectedAt: new Date().toISOString(),
+      sessionExpired: false,
+    };
+    this.setState(nextState);
+    return nextState;
+  }
+
+  public async selectOAuthSite(cloudId: string): Promise<JiraConnectionState> {
+    const res = await fetch('/api/auth/select-site', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ cloudId }),
+    });
+
+    const data = (await res.json().catch(() => ({}))) as SessionApiResponse;
+    if (!res.ok || !data.isConnected || !data.user) {
+      throw new Error(data.error || 'Failed to switch Jira site.');
+    }
+
+    const nextState: JiraConnectionState = {
+      isConnected: true,
+      isInitializing: false,
+      authMode: 'oauth',
+      siteUrl: data.siteUrl || '',
+      cloudId: data.cloudId || '',
+      user: data.user,
+      availableSites: data.availableSites || [],
+      connectedAt: new Date().toISOString(),
+      sessionExpired: false,
+    };
+    this.setState(nextState);
+    return nextState;
+  }
+
+  public markSessionExpired(): void {
+    this.setState({
+      isConnected: false,
+      isInitializing: false,
+      authMode: 'api_token',
+      siteUrl: '',
+      cloudId: '',
+      user: null,
+      availableSites: [],
+      sessionExpired: true,
+    });
+  }
+
+  public async disconnect(): Promise<void> {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+    } catch {
+      // Clear local state regardless of network failure
+    }
+
+    sessionStorage.removeItem(OAUTH_STATE_KEY);
+    this.setState({
+      isConnected: false,
+      isInitializing: false,
+      authMode: 'api_token',
+      siteUrl: '',
+      cloudId: '',
+      user: null,
+      availableSites: [],
+      connectedAt: undefined,
+      sessionExpired: false,
+    });
   }
 }
 

@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useJiraAuth } from '@/hooks/useJiraAuth';
 import { jiraAuth } from '@/services/jira/auth';
 import { jiraFields } from '@/services/jira/fields';
-import { jiraUsers } from '@/services/jira/users';
 import { settingsRepo } from '@/services/storage/settingsRepo';
-import { AppSettings, DEFAULT_SETTINGS } from '@/types/settings';
+import { AppSettings, DEFAULT_SETTINGS, ServerAuthConfig } from '@/types/settings';
 import { JiraField } from '@/types/jira';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,7 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import {
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Sliders,
   KeyRound,
   ShieldCheck,
@@ -28,7 +29,21 @@ import {
 } from 'lucide-react';
 
 export const SettingsPage: React.FC = () => {
-  const { isConnected, user, siteUrl, authMode, disconnect } = useJiraAuth();
+  const {
+    isConnected,
+    isInitializing,
+    user,
+    siteUrl,
+    cloudId,
+    authMode,
+    availableSites,
+    sessionExpired,
+    disconnect,
+  } = useJiraAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Server capability config
+  const [serverConfig, setServerConfig] = useState<ServerAuthConfig | null>(null);
 
   // App Settings state
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
@@ -39,23 +54,70 @@ export const SettingsPage: React.FC = () => {
   const [availableFields, setAvailableFields] = useState<JiraField[]>([]);
   const [isScanningFields, setIsScanningFields] = useState(false);
 
-  // Connection Form State (Session-only, zero credential storage in localStorage)
+  // Connection Form State (submitted directly to server proxy, never saved in browser storage)
   const [siteInput, setSiteInput] = useState(siteUrl || '');
   const [emailInput, setEmailInput] = useState('');
   const [apiTokenInput, setApiTokenInput] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isSwitchingSite, setIsSwitchingSite] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
 
-  // OAuth Form State
-  const [oauthClientId, setOauthClientId] = useState('');
-  const [oauthRedirectUri, setOauthRedirectUri] = useState(window.location.origin + '/settings');
+  // OAuth callback guard (prevents React StrictMode double invocation on single-use code)
+  const handledOAuthCodeRef = useRef<string | null>(null);
+  const oauthRedirectUri = `${window.location.origin}/settings`;
 
-  // Load stored settings on mount
+  // Load server config & stored settings on mount
   useEffect(() => {
+    jiraAuth
+      .getServerConfig()
+      .then(setServerConfig)
+      .catch(() => setServerConfig(null));
+
     settingsRepo.getSettings().then((s) => {
       setSettings(s);
     });
   }, []);
+
+  // Handle Atlassian OAuth 2.0 (3LO) callback parameters (?code=...&state=...)
+  useEffect(() => {
+    const code = searchParams.get('code');
+    const state = searchParams.get('state');
+    const oauthError = searchParams.get('error');
+    const oauthErrorDesc = searchParams.get('error_description');
+
+    if (oauthError) {
+      setConnectionError(oauthErrorDesc || `Atlassian authorization failed: ${oauthError}`);
+      setSearchParams({}, { replace: true });
+      return;
+    }
+
+    if (code && state) {
+      if (handledOAuthCodeRef.current === code) {
+        return;
+      }
+      handledOAuthCodeRef.current = code;
+
+      setIsConnecting(true);
+      setConnectionError(null);
+      setSearchParams({}, { replace: true });
+
+      jiraAuth
+        .completeOAuthCallback({
+          code,
+          state,
+          redirectUri: oauthRedirectUri,
+        })
+        .then(() => {
+          setIsConnecting(false);
+        })
+        .catch((err: unknown) => {
+          setConnectionError(
+            err instanceof Error ? err.message : 'OAuth login verification failed.'
+          );
+          setIsConnecting(false);
+        });
+    }
+  }, [searchParams, setSearchParams, oauthRedirectUri]);
 
   // Scan fields when connected
   useEffect(() => {
@@ -70,10 +132,12 @@ export const SettingsPage: React.FC = () => {
         .catch(() => {
           setIsScanningFields(false);
         });
+    } else {
+      setAvailableFields([]);
     }
-  }, [isConnected]);
+  }, [isConnected, cloudId, siteUrl]);
 
-  // Handle API Token connection
+  // Handle API Token connection via server-side encrypted HttpOnly cookie
   const handleConnectApiToken = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!siteInput.trim() || !emailInput.trim() || !apiTokenInput.trim()) {
@@ -85,36 +149,38 @@ export const SettingsPage: React.FC = () => {
     setConnectionError(null);
 
     try {
-      // Temporarily set credentials in session to test /myself
-      jiraAuth.setApiTokenConnection({
+      await jiraAuth.connectWithApiToken({
         siteUrl: siteInput.trim(),
         email: emailInput.trim(),
         apiToken: apiTokenInput.trim(),
-        user: { accountId: '', displayName: 'Connecting...' },
       });
 
-      // Fetch authenticated user to verify credentials
-      const currentUser = await jiraUsers.getMyself();
-
-      // Update auth state with verified user
-      jiraAuth.setApiTokenConnection({
-        siteUrl: siteInput.trim(),
-        email: emailInput.trim(),
-        apiToken: apiTokenInput.trim(),
-        user: currentUser,
-      });
-
-      // Clear input fields from memory
+      // Clear sensitive input immediately from React memory
       setApiTokenInput('');
+      setEmailInput('');
       setIsConnecting(false);
     } catch (err: unknown) {
-      jiraAuth.disconnect();
       setConnectionError(
         err instanceof Error
           ? err.message
           : 'Failed to connect. Please check your Jira Site URL, Email, and API Token.'
       );
       setIsConnecting(false);
+    }
+  };
+
+  // Switch Jira site for multi-site OAuth accounts
+  const handleSiteChange = async (newCloudId: string) => {
+    if (!newCloudId || newCloudId === cloudId) return;
+    setIsSwitchingSite(true);
+    setConnectionError(null);
+    try {
+      await jiraAuth.selectOAuthSite(newCloudId);
+      jiraFields.clearCache();
+    } catch (err: unknown) {
+      setConnectionError(err instanceof Error ? err.message : 'Failed to switch Jira site.');
+    } finally {
+      setIsSwitchingSite(false);
     }
   };
 
@@ -160,6 +226,36 @@ export const SettingsPage: React.FC = () => {
         </p>
       </div>
 
+      {/* Warning if deployed in production without SESSION_SECRET */}
+      {serverConfig && !serverConfig.hasSessionSecret && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Server Environment Configuration Required</AlertTitle>
+          <AlertDescription className="text-xs space-y-1 mt-1">
+            <p>
+              <code className="font-mono bg-destructive/15 px-1 rounded">SESSION_SECRET</code> is not configured in
+              Vercel Environment Variables. Encrypted <code className="font-mono">HttpOnly</code> session cookies cannot be
+              issued until it is added.
+            </p>
+            <p className="text-muted-foreground">
+              Add <code className="font-mono">SESSION_SECRET</code> (at least 32 random characters, e.g. from{' '}
+              <code className="font-mono">openssl rand -hex 32</code>) in Vercel Project Settings → Environment Variables,
+              then redeploy.
+            </p>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {sessionExpired && !isConnected && (
+        <Alert variant="warning">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Jira Session Expired or Revoked</AlertTitle>
+          <AlertDescription className="text-xs">
+            Your Jira session is no longer valid. Please reconnect below to continue importing or viewing tasks.
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* 1. Jira Connection Section */}
       <Card>
         <CardHeader className="pb-4">
@@ -168,8 +264,16 @@ export const SettingsPage: React.FC = () => {
               <KeyRound className="h-5 w-5 text-primary" />
               <CardTitle className="text-lg">Jira Cloud Connection</CardTitle>
             </div>
-            <Badge variant={isConnected ? 'success' : 'destructive'} className="gap-1.5 py-1 px-2.5">
-              {isConnected ? (
+            <Badge
+              variant={isInitializing ? 'outline' : isConnected ? 'success' : 'destructive'}
+              className="gap-1.5 py-1 px-2.5"
+            >
+              {isInitializing ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <span>Checking...</span>
+                </>
+              ) : isConnected ? (
                 <>
                   <CheckCircle2 className="h-3 w-3" />
                   <span>Connected ({authMode.toUpperCase()})</span>
@@ -183,12 +287,30 @@ export const SettingsPage: React.FC = () => {
             </Badge>
           </div>
           <CardDescription className="text-xs">
-            Direct client-side authentication with Atlassian Cloud. Tokens are strictly stored in session memory and never persisted in permanent storage.
+            All Jira requests route through a stateless same-origin serverless proxy using AES-256-GCM encrypted{' '}
+            <code className="font-mono">HttpOnly</code> cookies. Tokens are never readable by client JavaScript or stored in{' '}
+            <code className="font-mono">localStorage</code> / <code className="font-mono">sessionStorage</code>.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {isConnected && user ? (
+          {isConnecting && !isConnected ? (
+            <div className="p-8 text-center space-y-3 border rounded-xl bg-muted/20">
+              <Loader2 className="h-7 w-7 animate-spin text-primary mx-auto" />
+              <div className="text-sm font-medium">Completing secure Jira authentication...</div>
+              <p className="text-xs text-muted-foreground">
+                Verifying credentials and establishing encrypted HttpOnly session.
+              </p>
+            </div>
+          ) : isConnected && user ? (
             <div className="space-y-4">
+              {connectionError && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle>Error</AlertTitle>
+                  <AlertDescription className="text-xs">{connectionError}</AlertDescription>
+                </Alert>
+              )}
+
               <div className="p-4 rounded-xl border bg-muted/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center space-x-3">
                   {user.avatarUrls?.['48x48'] ? (
@@ -212,7 +334,12 @@ export const SettingsPage: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={disconnect} className="text-xs gap-1.5 text-destructive hover:text-destructive">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => disconnect()}
+                    className="text-xs gap-1.5 text-destructive hover:text-destructive"
+                  >
                     <LogOut className="h-3.5 w-3.5" />
                     <span>Disconnect</span>
                   </Button>
@@ -220,30 +347,129 @@ export const SettingsPage: React.FC = () => {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                <div className="p-3 rounded-lg border bg-card">
-                  <span className="text-muted-foreground block text-[11px]">Jira Cloud Site URL</span>
-                  <span className="font-semibold font-mono text-primary">{siteUrl}</span>
+                <div className="p-3 rounded-lg border bg-card space-y-1.5">
+                  <span className="text-muted-foreground block text-[11px]">Jira Cloud Site</span>
+                  {authMode === 'oauth' && availableSites && availableSites.length > 1 ? (
+                    <Select
+                      value={cloudId}
+                      disabled={isSwitchingSite}
+                      onChange={(e) => handleSiteChange(e.target.value)}
+                      className="text-xs h-8"
+                    >
+                      {availableSites.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({s.url.replace(/^https?:\/\//, '')})
+                        </option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <span className="font-semibold font-mono text-primary block truncate">{siteUrl}</span>
+                  )}
                 </div>
+
                 <div className="p-3 rounded-lg border bg-card">
-                  <span className="text-muted-foreground block text-[11px]">Security Mode</span>
+                  <span className="text-muted-foreground block text-[11px]">Session Security</span>
                   <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                    Client Session Memory Only (Zero Disk Persistence)
+                    Encrypted HttpOnly Cookie (Zero Browser Token Exposure)
                   </span>
                 </div>
               </div>
             </div>
           ) : (
-            <Tabs defaultValue="api_token">
+            <Tabs defaultValue={serverConfig?.oauthConfigured ? 'oauth' : 'api_token'}>
               <TabsList className="mb-4">
-                <TabsTrigger value="api_token" className="text-xs">
-                  Jira API Token (Direct Session)
-                </TabsTrigger>
                 <TabsTrigger value="oauth" className="text-xs">
-                  OAuth 2.0 (3LO)
+                  OAuth 2.0 (3LO) {serverConfig?.oauthConfigured ? '✓ Ready' : ''}
+                </TabsTrigger>
+                <TabsTrigger value="api_token" className="text-xs">
+                  Jira API Token (Proxied)
                 </TabsTrigger>
               </TabsList>
 
-              {/* Tab 1: API Token */}
+              {/* Tab 1: OAuth 2.0 (3LO) */}
+              <TabsContent value="oauth" className="space-y-4">
+                {connectionError && (
+                  <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Connection Failed</AlertTitle>
+                    <AlertDescription className="text-xs">{connectionError}</AlertDescription>
+                  </Alert>
+                )}
+
+                <div className="p-4 rounded-lg border bg-muted/20 space-y-3 text-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 font-semibold">
+                      <Lock className="h-4 w-4 text-primary" />
+                      <span>Atlassian OAuth 2.0 (3LO) Flow</span>
+                    </div>
+                    <Badge variant={serverConfig?.oauthConfigured ? 'success' : 'warning'} className="text-[10px]">
+                      {serverConfig?.oauthConfigured ? 'Server Configured' : 'Env Config Needed'}
+                    </Badge>
+                  </div>
+
+                  {serverConfig?.oauthConfigured && serverConfig.oauthClientId ? (
+                    <div className="space-y-3">
+                      <p className="text-muted-foreground leading-relaxed text-[11px]">
+                        OAuth 2.0 (3LO) is configured on the server. Clicking authorize redirects you to Atlassian to
+                        grant scoped Jira access; the server exchanges the code safely using{' '}
+                        <code className="font-mono bg-muted px-1 rounded">JIRA_OAUTH_CLIENT_SECRET</code> and stores the
+                        token in an encrypted <code className="font-mono bg-muted px-1 rounded">HttpOnly</code> cookie.
+                      </p>
+                      <Button
+                        variant="jira"
+                        size="sm"
+                        className="text-xs gap-1.5"
+                        disabled={!serverConfig.hasSessionSecret}
+                        onClick={() => {
+                          jiraAuth.startOAuthRedirect(serverConfig.oauthClientId!, oauthRedirectUri);
+                        }}
+                      >
+                        <Globe className="h-3.5 w-3.5" />
+                        <span>Authorize with Atlassian</span>
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 text-[11px] text-muted-foreground leading-relaxed">
+                      <p>
+                        To enable OAuth 2.0 (3LO) in production on Vercel without exposing{' '}
+                        <code className="font-mono text-foreground">client_secret</code> to browsers:
+                      </p>
+                      <ol className="list-decimal pl-4 space-y-1">
+                        <li>
+                          Create an OAuth 2.0 (3LO) app in the{' '}
+                          <a
+                            href="https://developer.atlassian.com/console/myapps"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary underline"
+                          >
+                            Atlassian Developer Console
+                          </a>{' '}
+                          with scopes{' '}
+                          <code className="bg-muted px-1 py-0.5 rounded">
+                            read:jira-work write:jira-work read:jira-user read:me offline_access
+                          </code>
+                          .
+                        </li>
+                        <li>
+                          Set the Callback URL in Atlassian Console to:{' '}
+                          <code className="bg-muted px-1.5 py-0.5 rounded text-foreground font-mono select-all">
+                            {oauthRedirectUri}
+                          </code>
+                        </li>
+                        <li>
+                          Add <code className="bg-muted px-1 rounded font-mono">JIRA_OAUTH_CLIENT_ID</code>,{' '}
+                          <code className="bg-muted px-1 rounded font-mono">JIRA_OAUTH_CLIENT_SECRET</code>, and{' '}
+                          <code className="bg-muted px-1 rounded font-mono">SESSION_SECRET</code> in Vercel Environment
+                          Variables (or <code className="bg-muted px-1 rounded font-mono">.env.local</code> for local dev).
+                        </li>
+                      </ol>
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+
+              {/* Tab 2: API Token */}
               <TabsContent value="api_token" className="space-y-4">
                 <form onSubmit={handleConnectApiToken} className="space-y-4">
                   {connectionError && (
@@ -264,7 +490,7 @@ export const SettingsPage: React.FC = () => {
                       required
                     />
                     <p className="text-[11px] text-muted-foreground">
-                      The base URL of your Atlassian Cloud site.
+                      The HTTPS base URL of your Atlassian Cloud site. Requests are proxied server-side to avoid CORS.
                     </p>
                   </div>
 
@@ -305,7 +531,12 @@ export const SettingsPage: React.FC = () => {
                     </div>
                   </div>
 
-                  <Button type="submit" variant="jira" disabled={isConnecting} className="w-full sm:w-auto text-xs gap-2">
+                  <Button
+                    type="submit"
+                    variant="jira"
+                    disabled={isConnecting || Boolean(serverConfig && !serverConfig.hasSessionSecret)}
+                    className="w-full sm:w-auto text-xs gap-2"
+                  >
                     {isConnecting ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -319,67 +550,6 @@ export const SettingsPage: React.FC = () => {
                     )}
                   </Button>
                 </form>
-              </TabsContent>
-
-              {/* Tab 2: OAuth 2.0 (3LO) */}
-              <TabsContent value="oauth" className="space-y-4">
-                <div className="p-4 rounded-lg border bg-muted/20 space-y-3 text-xs">
-                  <div className="flex items-center gap-2 font-semibold">
-                    <Lock className="h-4 w-4 text-primary" />
-                    <span>Atlassian OAuth 2.0 (3LO) Flow</span>
-                  </div>
-                  <p className="text-muted-foreground leading-relaxed text-[11px]">
-                    To connect via OAuth 2.0 (3LO), create an Atlassian Developer app in the{' '}
-                    <a
-                      href="https://developer.atlassian.com/console/myapps"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-primary underline"
-                    >
-                      Atlassian Developer Console
-                    </a>
-                    , configure the OAuth 2.0 (3LO) integration with the required Jira scopes (
-                    <code className="bg-muted px-1 py-0.5 rounded">read:jira-work write:jira-work read:me offline_access</code>
-                    ), and register this redirect callback URL.
-                  </p>
-
-                  <div className="space-y-1.5 pt-2">
-                    <label className="font-semibold block">OAuth Client ID</label>
-                    <Input
-                      placeholder="e.g. 9xkL21n..."
-                      value={oauthClientId}
-                      onChange={(e) => setOauthClientId(e.target.value)}
-                      className="text-xs font-mono"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="font-semibold block">Redirect URI</label>
-                    <Input
-                      value={oauthRedirectUri}
-                      onChange={(e) => setOauthRedirectUri(e.target.value)}
-                      className="text-xs font-mono"
-                    />
-                  </div>
-
-                  <Button
-                    variant="jira"
-                    size="sm"
-                    className="text-xs gap-1.5 mt-2"
-                    disabled={!oauthClientId.trim()}
-                    onClick={() => {
-                      const authUrl = jiraAuth.getOAuthAuthorizeUrl(
-                        oauthClientId.trim(),
-                        oauthRedirectUri,
-                        'state_' + Math.random().toString(36).substring(7)
-                      );
-                      window.location.href = authUrl;
-                    }}
-                  >
-                    <Globe className="h-3.5 w-3.5" />
-                    <span>Authorize with Atlassian</span>
-                  </Button>
-                </div>
               </TabsContent>
             </Tabs>
           )}
@@ -543,4 +713,3 @@ export const SettingsPage: React.FC = () => {
     </div>
   );
 };
-
