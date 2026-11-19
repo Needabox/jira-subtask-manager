@@ -22,6 +22,8 @@ export interface MyAssignedTasksFilter {
   projectKey?: string;
   statusCategory?: string; // 'new' | 'indeterminate' | 'done'
   priorityName?: string;
+  startDate?: string; // YYYY-MM-DD (inclusive lower bound for duedate)
+  endDate?: string;   // YYYY-MM-DD (inclusive upper bound for duedate)
   searchQuery?: string;
   includeCount?: boolean;
 }
@@ -57,7 +59,7 @@ function buildAssignedSubtasksJql(filter: MyAssignedTasksFilter): {
   jqlWhere: string;
   jqlWithOrder: string;
 } {
-  const { projectKey, statusCategory, priorityName, searchQuery } = filter;
+  const { projectKey, statusCategory, priorityName, startDate, endDate, searchQuery } = filter;
 
   const jqlParts: string[] = [
     'assignee = currentUser()',
@@ -80,6 +82,18 @@ function buildAssignedSubtasksJql(filter: MyAssignedTasksFilter): {
 
   if (priorityName && priorityName !== 'all') {
     jqlParts.push(`priority = "${priorityName.trim()}"`);
+  }
+
+  const isoDateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  const cleanStart = startDate?.trim() || '';
+  const cleanEnd = endDate?.trim() || '';
+
+  if (isoDateRegex.test(cleanStart)) {
+    jqlParts.push(`duedate >= "${cleanStart}"`);
+  }
+
+  if (isoDateRegex.test(cleanEnd)) {
+    jqlParts.push(`duedate <= "${cleanEnd}"`);
   }
 
   if (searchQuery && searchQuery.trim()) {

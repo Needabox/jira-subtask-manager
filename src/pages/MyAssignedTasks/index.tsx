@@ -7,7 +7,7 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
+import { CustomSelect, type SelectOption } from '@/components/ui/radix-select';
 import { isTaskOverdue } from '@/utils/dates';
 import {
   CheckSquare,
@@ -17,9 +17,18 @@ import {
   AlertTriangle,
   Loader2,
   Lock,
+  Calendar,
+  X,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { format, parseISO } from 'date-fns';
+
+const STATUS_FILTER_OPTIONS: SelectOption[] = [
+  { value: 'all', label: 'All Statuses', dotClassName: 'bg-muted-foreground/40' },
+  { value: 'new', label: 'To Do', dotClassName: 'bg-slate-400 dark:bg-slate-500' },
+  { value: 'indeterminate', label: 'In Progress', dotClassName: 'bg-amber-500' },
+  { value: 'done', label: 'Done', dotClassName: 'bg-emerald-500' },
+];
 
 export const MyAssignedTasksPage: React.FC = () => {
   const { isConnected, user, siteUrl, cloudId } = useJiraAuth();
@@ -27,7 +36,8 @@ export const MyAssignedTasksPage: React.FC = () => {
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatusCategory, setSelectedStatusCategory] = useState<string>('all');
-  const [selectedPriority, setSelectedPriority] = useState<string>('all');
+  const [startDateFilter, setStartDateFilter] = useState<string>('');
+  const [endDateFilter, setEndDateFilter] = useState<string>('');
   const [overdueOnly, setOverdueOnly] = useState<boolean>(false);
   const pageSize = 25;
   const [pageIndex, setPageIndex] = useState<number>(0);
@@ -40,6 +50,23 @@ export const MyAssignedTasksPage: React.FC = () => {
     setPageIndex(0);
     setPageTokens([undefined]);
     setApproxTotal(undefined);
+  };
+
+  const hasActiveFilters = Boolean(
+    searchQuery.trim() ||
+      selectedStatusCategory !== 'all' ||
+      startDateFilter ||
+      endDateFilter ||
+      overdueOnly
+  );
+
+  const handleResetAllFilters = () => {
+    setSearchQuery('');
+    setSelectedStatusCategory('all');
+    setStartDateFilter('');
+    setEndDateFilter('');
+    setOverdueOnly(false);
+    resetPagination();
   };
 
   // Sorting
@@ -63,7 +90,8 @@ export const MyAssignedTasksPage: React.FC = () => {
       currentCursor ?? 'first',
       pageSize,
       selectedStatusCategory,
-      selectedPriority,
+      startDateFilter,
+      endDateFilter,
       searchQuery,
     ],
     queryFn: () =>
@@ -71,7 +99,8 @@ export const MyAssignedTasksPage: React.FC = () => {
         nextPageToken: currentCursor,
         maxResults: pageSize,
         statusCategory: selectedStatusCategory,
-        priorityName: selectedPriority,
+        startDate: startDateFilter || undefined,
+        endDate: endDateFilter || undefined,
         searchQuery,
         includeCount: pageIndex === 0,
       }),
@@ -199,69 +228,146 @@ export const MyAssignedTasksPage: React.FC = () => {
       {/* Filter and Search Bar */}
       <Card>
         <CardContent className="p-4 space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3">
             {/* Search */}
-            <div className="lg:col-span-2 relative">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <div className="sm:col-span-2 lg:col-span-6 relative">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search Summary or Key..."
-                className="pl-8 text-xs h-9"
+                className="pl-9 pr-8 text-xs h-9 rounded-lg"
                 value={searchQuery}
                 onChange={(e) => {
                   setSearchQuery(e.target.value);
                   resetPagination();
                 }}
               />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    resetPagination();
+                  }}
+                  aria-label="Clear search"
+                  className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
             </div>
 
-            {/* Status Category */}
-            <div>
-              <Select
+            {/* Status Category (Custom Radix Dropdown) */}
+            <div className="lg:col-span-3">
+              <CustomSelect
+                ariaLabel="Filter by Status"
                 value={selectedStatusCategory}
-                onChange={(e) => {
-                  setSelectedStatusCategory(e.target.value);
+                onValueChange={(value) => {
+                  setSelectedStatusCategory(value);
                   resetPagination();
                 }}
-                className="text-xs h-9"
-              >
-                <option value="all">All Statuses</option>
-                <option value="new">To Do</option>
-                <option value="indeterminate">In Progress</option>
-                <option value="done">Completed</option>
-              </Select>
-            </div>
-
-            {/* Priority */}
-            <div>
-              <Select
-                value={selectedPriority}
-                onChange={(e) => {
-                  setSelectedPriority(e.target.value);
-                  resetPagination();
-                }}
-                className="text-xs h-9"
-              >
-                <option value="all">All Priorities</option>
-                <option value="Highest">Highest</option>
-                <option value="High">High</option>
-                <option value="Medium">Medium</option>
-                <option value="Low">Low</option>
-                <option value="Lowest">Lowest</option>
-              </Select>
+                options={STATUS_FILTER_OPTIONS}
+                placeholder="All Statuses"
+              />
             </div>
 
             {/* Overdue filter */}
-            <div className="flex items-center">
+            <div className="lg:col-span-3 flex items-center">
               <Button
                 variant={overdueOnly ? 'destructive' : 'outline'}
                 size="sm"
-                className="w-full h-9 text-xs gap-1.5"
+                className="w-full h-9 rounded-lg text-xs gap-1.5"
                 onClick={() => setOverdueOnly(!overdueOnly)}
               >
                 <AlertTriangle className="h-3.5 w-3.5" />
                 <span>{overdueOnly ? 'Show All Dates' : 'Overdue Only'}</span>
               </Button>
             </div>
+          </div>
+
+          {/* Date Range Filter Row */}
+          <div className="pt-3 border-t flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 flex-1">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground shrink-0">
+                <Calendar className="h-3.5 w-3.5 text-primary" />
+                <span>Date Range</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:items-center gap-2 flex-1">
+                <label className="flex items-center h-9 rounded-lg border border-input bg-background px-2.5 text-xs shadow-sm focus-within:ring-2 focus-within:ring-ring/30 focus-within:border-primary">
+                  <span className="text-[11px] font-medium text-muted-foreground mr-2 shrink-0 select-none">
+                    Start Date
+                  </span>
+                  <input
+                    type="date"
+                    aria-label="Start Date"
+                    value={startDateFilter}
+                    max={endDateFilter || undefined}
+                    onChange={(e) => {
+                      const nextStart = e.target.value;
+                      setStartDateFilter(nextStart);
+                      if (nextStart && endDateFilter && nextStart > endDateFilter) {
+                        setEndDateFilter(nextStart);
+                      }
+                      resetPagination();
+                    }}
+                    className="w-full bg-transparent text-xs font-mono focus:outline-none [color-scheme:light] dark:[color-scheme:dark]"
+                  />
+                </label>
+
+                <span className="hidden lg:inline text-muted-foreground text-xs select-none">—</span>
+
+                <label className="flex items-center h-9 rounded-lg border border-input bg-background px-2.5 text-xs shadow-sm focus-within:ring-2 focus-within:ring-ring/30 focus-within:border-primary">
+                  <span className="text-[11px] font-medium text-muted-foreground mr-2 shrink-0 select-none">
+                    End Date
+                  </span>
+                  <input
+                    type="date"
+                    aria-label="End Date"
+                    value={endDateFilter}
+                    min={startDateFilter || undefined}
+                    onChange={(e) => {
+                      const nextEnd = e.target.value;
+                      setEndDateFilter(nextEnd);
+                      if (nextEnd && startDateFilter && nextEnd < startDateFilter) {
+                        setStartDateFilter(nextEnd);
+                      }
+                      resetPagination();
+                    }}
+                    className="w-full bg-transparent text-xs font-mono focus:outline-none [color-scheme:light] dark:[color-scheme:dark]"
+                  />
+                </label>
+
+                {(startDateFilter || endDateFilter) && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setStartDateFilter('');
+                      setEndDateFilter('');
+                      resetPagination();
+                    }}
+                    className="h-9 px-2.5 text-xs text-muted-foreground hover:text-foreground gap-1 sm:col-span-2 lg:col-span-1 justify-center"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    <span>Clear Dates</span>
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {hasActiveFilters && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleResetAllFilters}
+                className="h-8 px-2.5 text-xs text-muted-foreground hover:text-destructive gap-1 self-start lg:self-auto shrink-0"
+              >
+                <X className="h-3.5 w-3.5" />
+                <span>Reset All Filters</span>
+              </Button>
+            )}
           </div>
         </CardContent>
       </Card>

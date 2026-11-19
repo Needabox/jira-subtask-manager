@@ -105,4 +105,31 @@ describe('Jira Cloud Search Migration (CHANGE-2046 /rest/api/3/search/jql)', () 
     expect(callCount).toBe(2);
     expect(all.map((i) => i.key)).toEqual(['PROJ-1', 'PROJ-2']);
   });
+
+  it('builds JQL date range clauses for startDate and endDate and ignores malformed dates', async () => {
+    const capturedJqls: string[] = [];
+    vi.spyOn(JiraHttpClient, 'post').mockImplementation(async (_endpoint, body) => {
+      capturedJqls.push(String((body as Record<string, unknown>).jql));
+      return { issues: [], isLast: true };
+    });
+
+    await jiraIssues.getMyAssignedSubtasks({
+      startDate: '2026-11-01',
+      endDate: '2026-11-30',
+      statusCategory: 'done',
+    });
+
+    expect(capturedJqls[0]).toContain('statusCategory = Done');
+    expect(capturedJqls[0]).toContain('duedate >= "2026-11-01"');
+    expect(capturedJqls[0]).toContain('duedate <= "2026-11-30"');
+
+    // Malformed dates must not be injected into JQL
+    await jiraIssues.getMyAssignedSubtasks({
+      startDate: '2026-11-01" OR 1=1',
+      endDate: 'invalid',
+    });
+
+    expect(capturedJqls[1]).not.toContain('duedate >=');
+    expect(capturedJqls[1]).not.toContain('duedate <=');
+  });
 });
